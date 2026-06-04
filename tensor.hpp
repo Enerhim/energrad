@@ -40,22 +40,33 @@ public:
   std::vector<float> toHost() const;
   const float *getDevicePtr() const { return d_values; };
 
+  std::vector<float> toHostGrad() const;
+  float *getDevicePtrGrad() { return d_grads; };
+
   OpType op() const { return m_op; }
   uint rows() const { return m_rows; };
   uint cols() const { return m_cols; };
+
+  bool hasGrad() const { return gradients; };
 
   // Display to Cout
 
   void pShape() const;
   void pData() const;
+  void pGrads() const;
+
+  void cudaGradFill(float fill);
+
+  void backward();
 
 private:
   uint m_rows, m_cols;
   std::string m_label;
   OpType m_op;
   std::vector<TensorPtr> m_parents;
-
   float *d_values;
+  float *d_grads;
+  bool gradients;
 };
 
 TensorPtr operator+(const TensorPtr &a, const TensorPtr &b);
