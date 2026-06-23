@@ -2,7 +2,7 @@
 
 // AddOp
 
-void AddOp::backward(const std::vector<float> &top_gradient) {
+void AddOp::backward(float *top_gradient) {
   auto a = parents[0].lock();
   auto b = parents[1].lock();
 

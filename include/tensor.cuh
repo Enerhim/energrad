@@ -27,7 +27,9 @@ struct TensorStorage {
 
   MemoryKind kind;
   std::shared_ptr<CudaContext> ctx;
-
+  TensorStorage(size_t elements, MemoryKind kind,
+                std::shared_ptr<CudaContext> ctx,
+                const std::vector<float> &data);
   ~TensorStorage();
 };
 
@@ -37,14 +39,8 @@ public:
   TensorObject(const std::string &label, const std::vector<size_t> &shape,
                bool hasGrad, std::shared_ptr<TensorStorage> storage);
 
-  std::vector<float> deviceData() const {
-    return std::vector<float>(storage->data_ptr,
-                              storage->data_ptr + storage->_size);
-  };
-  std::vector<float> deviceGrad() const {
-    return std::vector<float>(storage->grad_ptr,
-                              storage->grad_ptr + storage->_size);
-  };
+  float *deviceData() const { return storage->data_ptr; };
+  float *deviceGrad() const { return storage->grad_ptr; };
 
   std::vector<float> hostBuffer();
   std::vector<float> hostGradBuffer();
@@ -60,7 +56,7 @@ public:
   void setLabel(const std::string &l) { label = l; }
   void setGrad(const std::vector<float> &data);
   void zeroGrad();
-  void accumulateGrad(const std::vector<float> &top_grad);
+  void accumulateGrad(float *top_grad);
   void setOperation(std::shared_ptr<Operation> op) { parent_op = op; }
   friend Tensor operator+(const Tensor &, const Tensor &);
 

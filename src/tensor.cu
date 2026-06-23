@@ -90,7 +90,7 @@ void TensorObject::zeroGrad() {
   }
 }
 
-void TensorObject::accumulateGrad(const std::vector<float> &top_gradient) {
+void TensorObject::accumulateGrad(float *top_gradient) {
   if (!hasGrad)
     return;
 
@@ -104,31 +104,26 @@ void TensorObject::accumulateGrad(const std::vector<float> &top_gradient) {
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
 
   tensor_accumulate_kernel<<<blocks, BLOCK_SIZE, 0, storage->ctx->stream>>>(
-      top_gradient.data(), storage->grad_ptr, N);
+      top_gradient, storage->grad_ptr, N);
 }
 
-std::shared_ptr<TensorStorage> initStorage(size_t allocated_length,
-                                           const std::vector<float> &data,
-                                           std::shared_ptr<CudaContext> ctx) {
-  std::shared_ptr<TensorStorage> storage = std::make_shared<TensorStorage>();
+TensorStorage::TensorStorage(size_t elements, MemoryKind kind,
+                             std::shared_ptr<CudaContext> ctx,
+                             const std::vector<float> &data)
+    : _elements(elements), _size(elements * sizeof(float)), kind(kind),
+      ctx(ctx) {
+  if (kind == MemoryKind::Device) {
+    cudaMallocAsync(&data_ptr, _size, ctx->stream);
 
-  storage->_elements = allocated_length;
-  storage->_size = allocated_length * sizeof(float);
-
-  cudaMallocAsync(&storage->data_ptr, storage->_size, storage->ctx->stream);
-
-  if (!data.empty()) {
-    if (data.size() != storage->_elements) {
-      // std::cout << "_elements: " << _elements
-      //           << " | data.size(): " << data.size() << std::endl;
-      throw std::runtime_error("Error: Data provided as argument to Tensor "
-                               "is neither empty nor correct size.\n");
+    if (!data.empty()) {
+      if (data.size() != _elements) {
+        throw std::runtime_error("Error: Data provided as argument to Tensor "
+                                 "is neither empty nor correct size.\n");
+      }
+      cudaMemcpyAsync(data_ptr, data.data(), _size, cudaMemcpyHostToDevice,
+                      ctx->stream);
     }
-    cudaMemcpyAsync(storage->data_ptr, data.data(), storage->_size,
-                    cudaMemcpyHostToDevice, storage->ctx->stream);
   }
-
-  storage->ctx = ctx;
 }
 
 Tensor operator+(const Tensor &a, const Tensor &b) {
@@ -141,7 +136,9 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
 
   Tensor result = std::make_shared<TensorObject>(
       "", a->getShape(), a->hasGradient() || b->hasGradient(),
-      initStorage(a->noElements(), {}, ctx));
+      std::make_shared<TensorStorage>(a->noElements(), MemoryKind::Device,
+                                      a->getCudaContext(),
+                                      std::vector<float>{}));
 
   auto op = std::make_shared<AddOp>();
   op->setParents({a, b});
@@ -163,7 +160,8 @@ Tensor make_tensor(const std::string &label, const std::vector<size_t> &shape,
   for (size_t s : shape) {
     allocated_length *= s;
   }
-
   return std::make_shared<TensorObject>(
-      label, shape, hasGrad, initStorage(allocated_length, data, ctx));
+      label, shape, hasGrad,
+      std::make_shared<TensorStorage>(allocated_length, MemoryKind::Device, ctx,
+                                      data));
 }

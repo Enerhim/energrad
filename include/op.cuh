@@ -3,7 +3,7 @@
 
 class Operation {
 public:
-  virtual void backward(const std::vector<float> &top_gradient) = 0;
+  virtual void backward(float *top_gradient) = 0;
   virtual ~Operation() = default;
 
   const std::vector<TensorW> &getParents() const { return parents; }
@@ -17,5 +17,5 @@ protected:
 
 class AddOp : public Operation {
 public:
-  void backward(const std::vector<float> &top_gradient) override;
+  void backward(float *top_gradient) override;
 };
