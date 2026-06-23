@@ -20,8 +20,8 @@ struct Context {
 };
 
 struct TensorStorage {
-  float *data_ptr;
-  float *grad_ptr;
+  float *data_ptr = nullptr;
+  float *grad_ptr = nullptr;
   size_t _size;
   size_t _elements;
 
