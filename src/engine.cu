@@ -22,7 +22,7 @@ void Engine::backward(const Tensor &root) {
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
   root->zeroGrad();
   tensor_set<<<blocks, BLOCK_SIZE, 0, root->getCudaContext()->stream>>>(
-      1.0f, root->deviceGradBuffer().ptr, N);
+      1.0f, root->deviceGrad().data(), N);
 
   std::queue<TensorObject *> q;
 
@@ -58,8 +58,8 @@ void Engine::backward(const Tensor &root) {
     if (!op)
       continue;
 
-    auto grad = t->deviceGradBuffer();
-    if (grad.ptr == nullptr)
+    auto grad = t->deviceGrad();
+    if (grad.data() == nullptr)
       continue;
 
     op->backward(grad);

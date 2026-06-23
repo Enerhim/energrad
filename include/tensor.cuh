@@ -35,8 +35,7 @@ class TensorObject : public std::enable_shared_from_this<TensorObject> {
 
 public:
   TensorObject(const std::string &label, const std::vector<size_t> &shape,
-               bool hasGrad, const std::vector<float> &data,
-               std::shared_ptr<TensorStorage> storage);
+               bool hasGrad, std::shared_ptr<TensorStorage> storage);
 
   std::vector<float> deviceData() const {
     return std::vector<float>(storage->data_ptr,

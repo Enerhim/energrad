@@ -2,10 +2,7 @@
 
 // AddOp
 
-void AddOp::backward(const Buffer &top_gradient) {
-  if (top_gradient.kind != MemoryKind::Device)
-    throw std::runtime_error("Buffer kind for AddOp is not device.\n");
-
+void AddOp::backward(const std::vector<float> &top_gradient) {
   auto a = parents[0].lock();
   auto b = parents[1].lock();
 
@@ -14,5 +11,3 @@ void AddOp::backward(const Buffer &top_gradient) {
 }
 
 // MatmulOp
-
-void MatmulOp::backward(const Buffer &top_gradient) {}

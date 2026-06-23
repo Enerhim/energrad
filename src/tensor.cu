@@ -18,7 +18,6 @@ __global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
 
 TensorObject::TensorObject(const std::string &label,
                            const std::vector<size_t> &shape, bool hasGrad,
-                           const std::vector<float> &data,
                            std::shared_ptr<TensorStorage> storage)
     : label(label), shape(shape), hasGrad(hasGrad), storage(storage) {
 
@@ -108,10 +107,13 @@ void TensorObject::accumulateGrad(const std::vector<float> &top_gradient) {
       top_gradient.data(), storage->grad_ptr, N);
 }
 
-std::shared_ptr<TensorStorage> initStorage() {
+std::shared_ptr<TensorStorage> initStorage(size_t allocated_length,
+                                           const std::vector<float> &data,
+                                           std::shared_ptr<CudaContext> ctx) {
   std::shared_ptr<TensorStorage> storage = std::make_shared<TensorStorage>();
-  storage->_elements = strides[0] * shape[0];
-  storage->_size = storage->_elements * sizeof(float);
+
+  storage->_elements = allocated_length;
+  storage->_size = allocated_length * sizeof(float);
 
   cudaMallocAsync(&storage->data_ptr, storage->_size, storage->ctx->stream);
 
@@ -123,8 +125,10 @@ std::shared_ptr<TensorStorage> initStorage() {
                                "is neither empty nor correct size.\n");
     }
     cudaMemcpyAsync(storage->data_ptr, data.data(), storage->_size,
-                    cudaMemcpyHostToDevice, ctx->stream);
+                    cudaMemcpyHostToDevice, storage->ctx->stream);
   }
+
+  storage->ctx = ctx;
 }
 
 Tensor operator+(const Tensor &a, const Tensor &b) {
@@ -134,9 +138,10 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   }
 
   auto ctx = a->getCudaContext();
+
   Tensor result = std::make_shared<TensorObject>(
       "", a->getShape(), a->hasGradient() || b->hasGradient(),
-      std::vector<float>{}, ctx);
+      initStorage(a->noElements(), {}, ctx));
 
   auto op = std::make_shared<AddOp>();
   op->setParents({a, b});
@@ -147,13 +152,18 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
 
   tensor_add_kernel<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
-      a->deviceBuffer().ptr, b->deviceBuffer().ptr, result->deviceBuffer().ptr,
-      N);
+      a->storage->data_ptr, b->storage->data_ptr, result->storage->data_ptr, N);
   return result;
 }
 
 Tensor make_tensor(const std::string &label, const std::vector<size_t> &shape,
                    bool hasGrad, const std::vector<float> &data,
                    std::shared_ptr<CudaContext> ctx) {
-  return std::make_shared<TensorObject>(label, shape, hasGrad, data, ctx);
+  size_t allocated_length = 1;
+  for (size_t s : shape) {
+    allocated_length *= s;
+  }
+
+  return std::make_shared<TensorObject>(
+      label, shape, hasGrad, initStorage(allocated_length, data, ctx));
 }
