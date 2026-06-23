@@ -1,5 +1,7 @@
 #include "../include/op.cuh"
 
+// AddOp
+
 void AddOp::backward(const Buffer &top_gradient) {
   if (top_gradient.kind != MemoryKind::Device)
     throw std::runtime_error("Buffer kind for AddOp is not device.\n");
@@ -10,3 +12,7 @@ void AddOp::backward(const Buffer &top_gradient) {
   a->accumulateGrad(top_gradient);
   b->accumulateGrad(top_gradient);
 }
+
+// MatmulOp
+
+void MatmulOp::backward(const Buffer &top_gradient) {}

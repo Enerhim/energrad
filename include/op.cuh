@@ -19,3 +19,8 @@ class AddOp : public Operation {
 public:
   void backward(const Buffer &top_gradient) override;
 };
+
+class MatmulOp : public Operation {
+public:
+  void backward(const Buffer &top_gradient) override;
+};

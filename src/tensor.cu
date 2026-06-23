@@ -19,8 +19,8 @@ __global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
 TensorObject::TensorObject(const std::string &label,
                            const std::vector<size_t> &shape, bool hasGrad,
                            const std::vector<float> &data,
-                           std::shared_ptr<CudaContext> ctx)
-    : label(label), shape(shape), hasGrad(hasGrad), ctx(ctx) {
+                           std::shared_ptr<TensorStorage> storage)
+    : label(label), shape(shape), hasGrad(hasGrad), storage(storage) {
 
   // Construct Strides
   strides.resize(shape.size());
@@ -30,66 +30,48 @@ TensorObject::TensorObject(const std::string &label,
     stride *= shape[i];
   }
   strides[0] = stride;
-  _elements = strides[0] * shape[0];
-  _size = _elements * sizeof(float);
+}
 
-  // Allocate memory on GPU
-  cudaMallocAsync(&data_buffer.ptr, _size, ctx->stream);
-
-  if (!data.empty()) {
-    if (data.size() != _elements) {
-      // std::cout << "_elements: " << _elements
-      //           << " | data.size(): " << data.size() << std::endl;
-      throw std::runtime_error("Error: Data provided as argument to Tensor "
-                               "is neither empty nor correct size.\n");
-    }
-    cudaMemcpyAsync(data_buffer.ptr, data.data(), _size, cudaMemcpyHostToDevice,
-                    ctx->stream);
+TensorStorage::~TensorStorage() {
+  if (kind == MemoryKind::Device) {
+    if (data_ptr)
+      cudaFreeAsync(data_ptr, ctx->stream);
+    if (grad_ptr)
+      cudaFreeAsync(grad_ptr, ctx->stream);
+  } else {
+    free(data_ptr);
+    free(grad_ptr);
   }
 }
 
-TensorObject::~TensorObject() {
-  if (data_buffer.kind == MemoryKind::Device)
-    cudaFreeAsync(data_buffer.ptr, ctx->stream);
-  if (grad_buffer.kind == MemoryKind::Device)
-    cudaFreeAsync(grad_buffer.ptr, ctx->stream);
-}
-
 std::vector<float> TensorObject::hostBuffer() {
-  std::vector<float> h(_elements);
-  cudaMemcpyAsync(h.data(), data_buffer.ptr, _size, cudaMemcpyDeviceToHost,
-                  ctx->stream);
-  cudaStreamSynchronize(ctx->stream);
+  std::vector<float> h(storage->_elements);
+  cudaMemcpyAsync(h.data(), storage->data_ptr, storage->_size,
+                  cudaMemcpyDeviceToHost, storage->ctx->stream);
+  cudaStreamSynchronize(storage->ctx->stream);
   return h;
 }
 
 std::vector<float> TensorObject::hostGradBuffer() {
-  if (grad_buffer.ptr == nullptr || !hasGrad)
+  if (storage->grad_ptr == nullptr || !hasGrad)
     return {};
 
-  std::vector<float> h(_elements);
-  cudaMemcpyAsync(h.data(), grad_buffer.ptr, _size, cudaMemcpyDeviceToHost,
-                  ctx->stream);
-  cudaStreamSynchronize(ctx->stream);
+  std::vector<float> h(storage->_elements);
+  cudaMemcpyAsync(h.data(), storage->grad_ptr, storage->_size,
+                  cudaMemcpyDeviceToHost, storage->ctx->stream);
+  cudaStreamSynchronize(storage->ctx->stream);
   return h;
 }
 
-void TensorObject::setGrad(const Buffer &buffer) {
+void TensorObject::setGrad(const std::vector<float> &data) {
 
   if (hasGrad) {
 
-    if (grad_buffer.ptr == nullptr)
-      cudaMallocAsync(&grad_buffer.ptr, _size, ctx->stream);
-    switch (buffer.kind) {
-    case MemoryKind::Host:
-      cudaMemcpyAsync(grad_buffer.ptr, buffer.ptr, _size,
-                      cudaMemcpyHostToDevice, ctx->stream);
-      break;
-    case MemoryKind::Device:
-      cudaMemcpyAsync(grad_buffer.ptr, buffer.ptr, _size,
-                      cudaMemcpyDeviceToDevice, ctx->stream);
-      break;
-    }
+    if (storage->grad_ptr == nullptr)
+      cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
+
+    cudaMemcpyAsync(storage->grad_ptr, data.data(), storage->_size,
+                    cudaMemcpyHostToDevice, storage->ctx->stream);
   } else {
     throw std::runtime_error("hasGrad = false for this Tensor!\n");
   }
@@ -99,31 +81,50 @@ void TensorObject::zeroGrad() {
 
   if (hasGrad) {
 
-    if (grad_buffer.ptr == nullptr)
-      cudaMallocAsync(&grad_buffer.ptr, _size, ctx->stream);
+    if (storage->grad_ptr == nullptr)
+      cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
 
-    cudaMemsetAsync(grad_buffer.ptr, 0.0f, _size, ctx->stream);
+    cudaMemsetAsync(storage->grad_ptr, 0.0f, storage->_size,
+                    storage->ctx->stream);
   } else {
     throw std::runtime_error("hasGrad = false for this Tensor!\n");
   }
 }
 
-void TensorObject::accumulateGrad(const Buffer &top_gradient) {
+void TensorObject::accumulateGrad(const std::vector<float> &top_gradient) {
   if (!hasGrad)
     return;
 
-  if (grad_buffer.ptr == nullptr) {
-    cudaMallocAsync(&grad_buffer.ptr, _size, ctx->stream);
-    cudaMemsetAsync(grad_buffer.ptr, 0, _size, ctx->stream);
-    grad_buffer.kind = MemoryKind::Device;
+  if (storage->grad_ptr == nullptr) {
+    cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
+    cudaMemsetAsync(storage->grad_ptr, 0, storage->_size, storage->ctx->stream);
   }
 
-  uint N = _elements;
+  uint N = storage->_elements;
   const uint BLOCK_SIZE = 32;
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
 
-  tensor_accumulate_kernel<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
-      top_gradient.ptr, grad_buffer.ptr, N);
+  tensor_accumulate_kernel<<<blocks, BLOCK_SIZE, 0, storage->ctx->stream>>>(
+      top_gradient.data(), storage->grad_ptr, N);
+}
+
+std::shared_ptr<TensorStorage> initStorage() {
+  std::shared_ptr<TensorStorage> storage = std::make_shared<TensorStorage>();
+  storage->_elements = strides[0] * shape[0];
+  storage->_size = storage->_elements * sizeof(float);
+
+  cudaMallocAsync(&storage->data_ptr, storage->_size, storage->ctx->stream);
+
+  if (!data.empty()) {
+    if (data.size() != storage->_elements) {
+      // std::cout << "_elements: " << _elements
+      //           << " | data.size(): " << data.size() << std::endl;
+      throw std::runtime_error("Error: Data provided as argument to Tensor "
+                               "is neither empty nor correct size.\n");
+    }
+    cudaMemcpyAsync(storage->data_ptr, data.data(), storage->_size,
+                    cudaMemcpyHostToDevice, ctx->stream);
+  }
 }
 
 Tensor operator+(const Tensor &a, const Tensor &b) {

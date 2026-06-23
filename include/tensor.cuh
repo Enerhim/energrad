@@ -15,15 +15,20 @@ class Engine;
 using Tensor = std::shared_ptr<TensorObject>;
 using TensorW = std::weak_ptr<TensorObject>;
 
-struct Buffer {
-  Buffer() : ptr(nullptr), kind(MemoryKind::Host) {};
-  Buffer(float *ptr, MemoryKind kind) : ptr(ptr), kind(kind) {};
-  float *ptr;
-  MemoryKind kind;
-};
-
 struct Context {
   std::vector<TensorW> saved_tensors;
+};
+
+struct TensorStorage {
+  float *data_ptr;
+  float *grad_ptr;
+  size_t _size;
+  size_t _elements;
+
+  MemoryKind kind;
+  std::shared_ptr<CudaContext> ctx;
+
+  ~TensorStorage();
 };
 
 class TensorObject : public std::enable_shared_from_this<TensorObject> {
@@ -31,42 +36,43 @@ class TensorObject : public std::enable_shared_from_this<TensorObject> {
 public:
   TensorObject(const std::string &label, const std::vector<size_t> &shape,
                bool hasGrad, const std::vector<float> &data,
-               std::shared_ptr<CudaContext> ctx);
-  ~TensorObject();
+               std::shared_ptr<TensorStorage> storage);
 
-  std::shared_ptr<CudaContext> getCudaContext() const { return ctx; }
-
-  Buffer deviceBuffer() const { return data_buffer; }
-  Buffer deviceGradBuffer() const { return grad_buffer; }
+  std::vector<float> deviceData() const {
+    return std::vector<float>(storage->data_ptr,
+                              storage->data_ptr + storage->_size);
+  };
+  std::vector<float> deviceGrad() const {
+    return std::vector<float>(storage->grad_ptr,
+                              storage->grad_ptr + storage->_size);
+  };
 
   std::vector<float> hostBuffer();
   std::vector<float> hostGradBuffer();
 
   const std::vector<size_t> &getShape() const { return shape; }
-  size_t getSize() const { return _size; }
-  size_t noElements() const { return _elements; }
+  size_t getSize() const { return storage->_size; }
+  size_t noElements() const { return storage->_elements; }
   bool hasGradient() const { return hasGrad; }
-  void setLabel(const std::string &l) { label = l; }
   const std::string &getLabel() const { return label; }
   std::shared_ptr<Operation> getOperation() const { return parent_op; }
+  std::shared_ptr<CudaContext> getCudaContext() const { return storage->ctx; }
 
-  void setGrad(const Buffer &buffer);
+  void setLabel(const std::string &l) { label = l; }
+  void setGrad(const std::vector<float> &data);
   void zeroGrad();
-  void accumulateGrad(const Buffer &top_gradient);
+  void accumulateGrad(const std::vector<float> &top_grad);
   void setOperation(std::shared_ptr<Operation> op) { parent_op = op; }
   friend Tensor operator+(const Tensor &, const Tensor &);
 
 private:
   std::vector<size_t> shape;
   std::vector<size_t> strides;
-  size_t _size;
-  size_t _elements;
+
+  std::shared_ptr<TensorStorage> storage;
 
   bool hasGrad;
-  Buffer data_buffer = Buffer(nullptr, MemoryKind::Device);
-  Buffer grad_buffer = Buffer(nullptr, MemoryKind::Device);
 
-  std::shared_ptr<CudaContext> ctx;
   std::string label;
   std::shared_ptr<Operation> parent_op;
 };
