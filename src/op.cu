@@ -1,7 +1,6 @@
 #include "../include/op.cuh"
 
-// AddOp
-
+// TODO: Optimize with blocking m8
 __global__ void tensor_backbroadcast(float *dX, const float *dY,
                                      size_t no_elements, size_t rank,
                                      const size_t *shape_X,
@@ -47,7 +46,7 @@ void ExpandOp::backward(float *top_gradient) {
   for (size_t size_ : new_shape)
     no_elements *= size_;
 
-  size_t no_elements_old = 1;
+  size_t no_elements_old = sizeof(float);
   for (size_t size_ : prev_shape)
     no_elements_old *= size_;
 
@@ -56,16 +55,34 @@ void ExpandOp::backward(float *top_gradient) {
   }
 
   float *dX;
-  cudaMallocAsync(&dX, no_elements_old * sizeof(float), ctx->stream);
+  cudaMallocAsync(&dX, no_elements_old, ctx->stream);
+  cudaMemsetAsync(dX, 0, no_elements_old, ctx->stream);
+
+  size_t *shape_X, *strides_X, *strides_Y;
+  size_t shape_X_size = prev_shape.size() * sizeof(float),
+         strides_X_size = prev_strides.size() * sizeof(float),
+         strides_Y_size = new_strides.size() * sizeof(float);
+
+  cudaMallocAsync(&shape_X, shape_X_size, ctx->stream);
+  cudaMallocAsync(&strides_X, strides_X_size, ctx->stream);
+  cudaMallocAsync(&strides_Y, strides_Y_size, ctx->stream);
+
+  cudaMemcpyAsync(shape_X, prev_shape.data(), shape_X_size,
+                  cudaMemcpyHostToDevice, ctx->stream);
+  cudaMemcpyAsync(strides_X, prev_strides.data(), strides_X_size,
+                  cudaMemcpyHostToDevice, ctx->stream);
+  cudaMemcpyAsync(strides_Y, new_strides.data(), strides_Y_size,
+                  cudaMemcpyHostToDevice, ctx->stream);
 
   const uint BLOCK_SIZE = 32;
   uint blocks = CEIL_DIV(no_elements, BLOCK_SIZE);
   tensor_backbroadcast<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
-      dX, top_gradient, no_elements, prev_shape.size(), prev_shape.data(),
-      prev_strides.data(), new_strides.data());
+      dX, top_gradient, no_elements, prev_shape.size(), shape_X, strides_X,
+      strides_Y);
 
-  cudaFreeAsync(a->getStorage()->grad_ptr, ctx->stream);
-  a->getStorage()->_elements = no_elements_old;
-  a->getStorage()->_size = no_elements_old * sizeof(float);
+  cudaFreeAsync(shape_X, ctx->stream);
+  cudaFreeAsync(strides_X, ctx->stream);
+  cudaFreeAsync(strides_Y, ctx->stream);
+
   a->accumulateGrad(dX);
 }

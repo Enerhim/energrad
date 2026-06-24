@@ -47,8 +47,8 @@ public:
 
   const std::vector<size_t> &getShape() const { return shape; }
   const std::vector<size_t> &getStrides() const { return strides; }
-  size_t getSize() const { return storage->_size; }
-  size_t noElements() const { return storage->_elements; }
+  size_t getSize() const;
+  size_t noElements() const;
   bool hasGradient() const { return hasGrad; }
   const std::string &getLabel() const { return label; }
   std::shared_ptr<Operation> getOperation() const { return parent_op; }

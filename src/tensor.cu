@@ -1,15 +1,29 @@
 #include "../include/op.cuh"
 #include "../include/tensor.cuh"
 
-#include <iostream>
-#include <stdexcept>
-
 __global__ void tensor_add_kernel(const float *A, const float *B, float *C,
-                                  size_t N, const size_t *strides) {
-  uint idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < N) {
-    C[idx] = A[idx] + B[idx];
+                                  size_t N, size_t ndim, const size_t *shape,
+                                  const size_t *strides_A,
+                                  const size_t *strides_B) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (idx >= N)
+    return;
+
+  size_t remaining = idx;
+
+  size_t offsetA = 0;
+  size_t offsetB = 0;
+
+  for (int dim = ndim - 1; dim >= 0; --dim) {
+    size_t coord = remaining % shape[dim];
+    remaining /= shape[dim];
+
+    offsetA += coord * strides_A[dim];
+    offsetB += coord * strides_B[dim];
   }
+
+  C[idx] = A[offsetA] + B[offsetB];
 }
 
 __global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
@@ -44,6 +58,20 @@ TensorStorage::~TensorStorage() {
     free(data_ptr);
     free(grad_ptr);
   }
+}
+
+size_t TensorObject::noElements() const {
+  size_t n = 1;
+  for (size_t s : shape)
+    n *= s;
+  return n;
+}
+
+size_t TensorObject::getSize() const {
+  size_t n = 1;
+  for (size_t s : shape)
+    n *= s;
+  return n * sizeof(float);
 }
 
 std::vector<float> TensorObject::hostBuffer() {
@@ -151,9 +179,33 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   const uint BLOCK_SIZE = 32;
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
 
+  auto A_shape = a->getShape();
+  auto A_strides = a->getStrides();
+  auto B_strides = b->getStrides();
+
+  size_t *shape_A, *strides_A, *strides_B;
+  size_t shape_A_size = A_shape.size() * sizeof(float),
+         strides_A_size = A_strides.size() * sizeof(float),
+         strides_B_size = B_strides.size() * sizeof(float);
+
+  cudaMallocAsync(&shape_A, shape_A_size, ctx->stream);
+  cudaMallocAsync(&strides_A, strides_A_size, ctx->stream);
+  cudaMallocAsync(&strides_B, strides_B_size, ctx->stream);
+
+  cudaMemcpyAsync(shape_A, A_shape.data(), shape_A_size, cudaMemcpyHostToDevice,
+                  ctx->stream);
+  cudaMemcpyAsync(strides_A, A_strides.data(), strides_A_size,
+                  cudaMemcpyHostToDevice, ctx->stream);
+  cudaMemcpyAsync(strides_B, B_strides.data(), strides_B_size,
+                  cudaMemcpyHostToDevice, ctx->stream);
+
   tensor_add_kernel<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
       a->storage->data_ptr, b->storage->data_ptr, result->storage->data_ptr, N,
-      a->getStrides().data());
+      a->getShape().size(), shape_A, strides_A, strides_B);
+
+  cudaFreeAsync(shape_A, ctx->stream);
+  cudaFreeAsync(strides_A, ctx->stream);
+  cudaFreeAsync(strides_B, ctx->stream);
   return result;
 }
 
@@ -200,13 +252,6 @@ Tensor expand(const Tensor &a, const std::vector<size_t> &target_shape) {
 
   Tensor result = std::make_shared<TensorObject>(
       "", target_shape, a->hasGradient(), a->getStorage());
-
-  size_t no_elements = 1;
-  for (size_t s : target_shape)
-    no_elements *= s;
-
-  result->getStorage()->_elements = no_elements;
-  result->getStorage()->_size = no_elements * sizeof(float);
 
   auto op = std::make_shared<ExpandOp>();
   op->setParents({a});
