@@ -184,9 +184,9 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   auto B_strides = b->getStrides();
 
   size_t *shape_A, *strides_A, *strides_B;
-  size_t shape_A_size = A_shape.size() * sizeof(float),
-         strides_A_size = A_strides.size() * sizeof(float),
-         strides_B_size = B_strides.size() * sizeof(float);
+  size_t shape_A_size = A_shape.size() * sizeof(size_t),
+         strides_A_size = A_strides.size() * sizeof(size_t),
+         strides_B_size = B_strides.size() * sizeof(size_t);
 
   cudaMallocAsync(&shape_A, shape_A_size, ctx->stream);
   cudaMallocAsync(&strides_A, strides_A_size, ctx->stream);

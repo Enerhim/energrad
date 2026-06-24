@@ -5,19 +5,19 @@ __global__ void tensor_backbroadcast(float *dX, const float *dY,
                                      size_t no_elements, size_t rank,
                                      const size_t *shape_X,
                                      const size_t *strides_X,
-                                     const size_t *strides_Y) {
-  int i = blockDim.x * blockIdx.x + threadIdx.x;
+                                     const size_t *shape_Y) {
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
 
   if (i < no_elements) {
-    int dx_flat_index = 0;
-    int current_dy_index = i;
+    size_t remaining = i;
+    size_t dx_flat_index = 0;
 
-    for (int d = 0; d < rank; d++) {
-      int coord_in_Y_space = current_dy_index / strides_Y[d];
-      current_dy_index = current_dy_index % strides_Y[d];
+    for (int d = rank - 1; d >= 0; --d) {
+      size_t coord = remaining % shape_Y[d];
+      remaining /= shape_Y[d];
 
-      int coord_in_X_space = (shape_X[d] == 1) ? 0 : coord_in_Y_space;
-      dx_flat_index += coord_in_X_space * strides_X[d];
+      size_t coord_X = (shape_X[d] == 1) ? 0 : coord;
+      dx_flat_index += coord_X * strides_X[d];
     }
 
     atomicAdd(&dX[dx_flat_index], dY[i]);
@@ -46,43 +46,43 @@ void ExpandOp::backward(float *top_gradient) {
   for (size_t size_ : new_shape)
     no_elements *= size_;
 
-  size_t no_elements_old = sizeof(float);
+  size_t no_elements_old = 1;
   for (size_t size_ : prev_shape)
     no_elements_old *= size_;
 
   while (new_shape.size() > prev_shape.size()) {
     prev_shape.insert(prev_shape.begin(), 1);
+    prev_strides.insert(prev_strides.begin(), 0);
   }
-
   float *dX;
-  cudaMallocAsync(&dX, no_elements_old, ctx->stream);
-  cudaMemsetAsync(dX, 0, no_elements_old, ctx->stream);
+  cudaMallocAsync(&dX, no_elements_old * sizeof(size_t), ctx->stream);
+  cudaMemsetAsync(dX, 0, no_elements_old * sizeof(size_t), ctx->stream);
 
-  size_t *shape_X, *strides_X, *strides_Y;
-  size_t shape_X_size = prev_shape.size() * sizeof(float),
-         strides_X_size = prev_strides.size() * sizeof(float),
-         strides_Y_size = new_strides.size() * sizeof(float);
+  size_t *shape_X, *strides_X, *shape_Y;
+  size_t shape_X_size = prev_shape.size() * sizeof(size_t),
+         strides_X_size = prev_strides.size() * sizeof(size_t),
+         shape_Y_size = new_shape.size() * sizeof(size_t);
 
   cudaMallocAsync(&shape_X, shape_X_size, ctx->stream);
   cudaMallocAsync(&strides_X, strides_X_size, ctx->stream);
-  cudaMallocAsync(&strides_Y, strides_Y_size, ctx->stream);
+  cudaMallocAsync(&shape_Y, shape_Y_size, ctx->stream);
 
   cudaMemcpyAsync(shape_X, prev_shape.data(), shape_X_size,
                   cudaMemcpyHostToDevice, ctx->stream);
   cudaMemcpyAsync(strides_X, prev_strides.data(), strides_X_size,
                   cudaMemcpyHostToDevice, ctx->stream);
-  cudaMemcpyAsync(strides_Y, new_strides.data(), strides_Y_size,
+  cudaMemcpyAsync(shape_Y, new_strides.data(), shape_Y_size,
                   cudaMemcpyHostToDevice, ctx->stream);
 
   const uint BLOCK_SIZE = 32;
   uint blocks = CEIL_DIV(no_elements, BLOCK_SIZE);
   tensor_backbroadcast<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
       dX, top_gradient, no_elements, prev_shape.size(), shape_X, strides_X,
-      strides_Y);
+      shape_Y);
 
   cudaFreeAsync(shape_X, ctx->stream);
   cudaFreeAsync(strides_X, ctx->stream);
-  cudaFreeAsync(strides_Y, ctx->stream);
+  cudaFreeAsync(shape_Y, ctx->stream);
 
   a->accumulateGrad(dX);
 }
