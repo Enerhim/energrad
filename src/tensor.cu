@@ -1,8 +1,11 @@
 #include "../include/op.cuh"
 #include "../include/tensor.cuh"
 
+#include <iostream>
+#include <stdexcept>
+
 __global__ void tensor_add_kernel(const float *A, const float *B, float *C,
-                                  size_t N) {
+                                  size_t N, const size_t *strides) {
   uint idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) {
     C[idx] = A[idx] + B[idx];
@@ -149,7 +152,67 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   uint blocks = CEIL_DIV(N, BLOCK_SIZE);
 
   tensor_add_kernel<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
-      a->storage->data_ptr, b->storage->data_ptr, result->storage->data_ptr, N);
+      a->storage->data_ptr, b->storage->data_ptr, result->storage->data_ptr, N,
+      a->getStrides().data());
+  return result;
+}
+
+std::vector<size_t> checkBroadcastable(const std::vector<size_t> &src_shape,
+                                       const std::vector<size_t> &src_strides,
+                                       const std::vector<size_t> &dst_shape) {
+  size_t src_dims = src_shape.size();
+  size_t dst_dims = dst_shape.size();
+
+  if (src_dims > dst_dims)
+    throw std::runtime_error("Error: Cannot broadcast to smaller shape.\n");
+
+  std::vector<size_t> new_strides(dst_dims, 0);
+
+  for (int i = 0; i < dst_dims; i++) {
+    int dst_idx = dst_dims - 1 - i;
+    int src_idx = src_dims - 1 - i;
+
+    if (src_idx >= 0) {
+      size_t src_dim_sz = src_shape[src_idx];
+      size_t dst_dim_sz = dst_shape[dst_idx];
+
+      if (src_dim_sz == dst_dim_sz) {
+        new_strides[dst_idx] = src_strides[src_idx];
+      } else if (src_dim_sz == 1) {
+        new_strides[dst_idx] = 0;
+      } else {
+        throw std::runtime_error(
+            "Error: Shapes are either not broadcastable or are the same.\n");
+      }
+    } else {
+      new_strides[dst_idx] = 0;
+    }
+  }
+
+  return new_strides;
+}
+
+Tensor expand(const Tensor &a, const std::vector<size_t> &target_shape) {
+  std::vector<size_t> new_strides =
+      checkBroadcastable(a->getShape(), a->getStrides(), target_shape);
+
+  auto ctx = a->getCudaContext();
+
+  Tensor result = std::make_shared<TensorObject>(
+      "", target_shape, a->hasGradient(), a->getStorage());
+
+  size_t no_elements = 1;
+  for (size_t s : target_shape)
+    no_elements *= s;
+
+  result->getStorage()->_elements = no_elements;
+  result->getStorage()->_size = no_elements * sizeof(float);
+
+  auto op = std::make_shared<ExpandOp>();
+  op->setParents({a});
+  op->forward_ctx.saved_tensors.push_back(TensorW(result));
+  result->setOperation(op);
+  result->strides = new_strides;
   return result;
 }
 

@@ -46,33 +46,38 @@ public:
   std::vector<float> hostGradBuffer();
 
   const std::vector<size_t> &getShape() const { return shape; }
+  const std::vector<size_t> &getStrides() const { return strides; }
   size_t getSize() const { return storage->_size; }
   size_t noElements() const { return storage->_elements; }
   bool hasGradient() const { return hasGrad; }
   const std::string &getLabel() const { return label; }
   std::shared_ptr<Operation> getOperation() const { return parent_op; }
   std::shared_ptr<CudaContext> getCudaContext() const { return storage->ctx; }
+  std::shared_ptr<TensorStorage> getStorage() const { return storage; }
 
   void setLabel(const std::string &l) { label = l; }
   void setGrad(const std::vector<float> &data);
   void zeroGrad();
   void accumulateGrad(float *top_grad);
   void setOperation(std::shared_ptr<Operation> op) { parent_op = op; }
+
+  // Friend ops
   friend Tensor operator+(const Tensor &, const Tensor &);
+  friend Tensor expand(const Tensor &, const std::vector<size_t> &);
+  friend Tensor flatten(const Tensor &a);
 
 private:
   std::vector<size_t> shape;
   std::vector<size_t> strides;
-
   std::shared_ptr<TensorStorage> storage;
-
   bool hasGrad;
-
   std::string label;
   std::shared_ptr<Operation> parent_op;
 };
 
 Tensor operator+(const Tensor &a, const Tensor &b);
+Tensor expand(const Tensor &a, const std::vector<size_t> &shape);
+Tensor flatten(const Tensor &a);
 
 Tensor make_tensor(const std::string &label, const std::vector<size_t> &shape,
                    bool hasGrad, const std::vector<float> &data,
