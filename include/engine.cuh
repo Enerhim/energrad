@@ -5,7 +5,7 @@
 
 class Engine {
 public:
-  void backward(const Tensor &root);
+  void backward(TensorObject *root);
 
 private:
   std::map<TensorObject *, uint> indeg_count;

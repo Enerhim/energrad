@@ -1,31 +1,7 @@
-#include "../include/op.cuh"
 #include "../include/tensor.cuh"
+#include <stdexcept>
 
-__global__ void tensor_add_kernel(const float *A, const float *B, float *C,
-                                  size_t N, size_t ndim, const size_t *shape,
-                                  const size_t *strides_A,
-                                  const size_t *strides_B) {
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-  if (idx >= N)
-    return;
-
-  size_t remaining = idx;
-
-  size_t offsetA = 0;
-  size_t offsetB = 0;
-
-  for (int dim = ndim - 1; dim >= 0; --dim) {
-    size_t coord = remaining % shape[dim];
-    remaining /= shape[dim];
-
-    offsetA += coord * strides_A[dim];
-    offsetB += coord * strides_B[dim];
-  }
-
-  C[idx] = A[offsetA] + B[offsetB];
-}
-
+// CUDA Kernels
 __global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
   uint idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < N) {
@@ -33,10 +9,55 @@ __global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
   }
 }
 
+// Grad Context
+
+GradContext::GradContext(std::shared_ptr<Operation> parent_op, bool hasGrad,
+                         bool delGrad)
+    : op(parent_op), hasGrad(hasGrad), delGrad(delGrad) {
+
+      };
+
+// Tensor Storage
+TensorStorage::TensorStorage(size_t allocation_size,
+                             std::shared_ptr<CudaContext> cuda_ctx)
+    : cuda_ctx(cuda_ctx) {
+
+  _size = allocation_size;
+  _elements = allocation_size / sizeof(float);
+
+  cudaMallocAsync(&data_ptr, _size, cuda_ctx->stream);
+  cudaMemsetAsync(data_ptr, 0, _size, cuda_ctx->stream);
+}
+
+TensorStorage::~TensorStorage() {
+  if (data_ptr)
+    cudaFreeAsync(data_ptr, cuda_ctx->stream);
+}
+
+void TensorStorage::setData(const std::vector<float> &data) {
+  if ((data.size() * sizeof(float)) != _size)
+    throw std::runtime_error("Error: Invalid size for setData.\n");
+
+  cudaMemcpyAsync(&data_ptr, data.data(), _size, cudaMemcpyHostToDevice,
+                  cuda_ctx->stream);
+}
+
+// Tensr Object
+
 TensorObject::TensorObject(const std::string &label,
-                           const std::vector<size_t> &shape, bool hasGrad,
-                           std::shared_ptr<TensorStorage> storage)
-    : label(label), shape(shape), hasGrad(hasGrad), storage(storage) {
+                           const std::vector<size_t> &shape,
+                           std::shared_ptr<TensorStorage> storage,
+                           std::shared_ptr<GradContext> grad_ctx)
+    : label(label), shape(shape), storage(storage), grad_ctx(grad_ctx) {
+
+  // Check if size of storage = size of shapes
+  size_t size_from_shape = sizeof(size_t);
+  for (size_t s : shape)
+    size_from_shape *= s;
+
+  if (storage->getSize() != size_from_shape)
+    throw std::runtime_error("Error: Mismatch between TensorObject size from "
+                             "shape and TensorStorage size.\n");
 
   // Construct Strides
   strides.resize(shape.size());
@@ -48,228 +69,86 @@ TensorObject::TensorObject(const std::string &label,
   strides[0] = stride;
 }
 
-TensorStorage::~TensorStorage() {
-  if (kind == MemoryKind::Device) {
-    if (data_ptr)
-      cudaFreeAsync(data_ptr, ctx->stream);
-    if (grad_ptr)
-      cudaFreeAsync(grad_ptr, ctx->stream);
-  } else {
-    free(data_ptr);
-    free(grad_ptr);
-  }
-}
+std::vector<float> TensorObject::toHost() {
 
-size_t TensorObject::noElements() const {
-  size_t n = 1;
-  for (size_t s : shape)
-    n *= s;
-  return n;
-}
-
-size_t TensorObject::getSize() const {
-  size_t n = 1;
-  for (size_t s : shape)
-    n *= s;
-  return n * sizeof(float);
-}
-
-std::vector<float> TensorObject::hostBuffer() {
-  std::vector<float> h(storage->_elements);
-  cudaMemcpyAsync(h.data(), storage->data_ptr, storage->_size,
-                  cudaMemcpyDeviceToHost, storage->ctx->stream);
-  cudaStreamSynchronize(storage->ctx->stream);
-  return h;
-}
-
-std::vector<float> TensorObject::hostGradBuffer() {
-  if (storage->grad_ptr == nullptr || !hasGrad)
-    return {};
-
-  std::vector<float> h(storage->_elements);
-  cudaMemcpyAsync(h.data(), storage->grad_ptr, storage->_size,
-                  cudaMemcpyDeviceToHost, storage->ctx->stream);
-  cudaStreamSynchronize(storage->ctx->stream);
-  return h;
-}
-
-void TensorObject::setGrad(const std::vector<float> &data) {
-
-  if (hasGrad) {
-
-    if (storage->grad_ptr == nullptr)
-      cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
-
-    cudaMemcpyAsync(storage->grad_ptr, data.data(), storage->_size,
-                    cudaMemcpyHostToDevice, storage->ctx->stream);
-  } else {
-    throw std::runtime_error("hasGrad = false for this Tensor!\n");
-  }
-}
-
-void TensorObject::zeroGrad() {
-
-  if (hasGrad) {
-
-    if (storage->grad_ptr == nullptr)
-      cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
-
-    cudaMemsetAsync(storage->grad_ptr, 0.0f, storage->_size,
-                    storage->ctx->stream);
-  } else {
-    throw std::runtime_error("hasGrad = false for this Tensor!\n");
-  }
-}
-
-void TensorObject::accumulateGrad(float *top_gradient) {
-  if (!hasGrad)
-    return;
-
-  if (storage->grad_ptr == nullptr) {
-    cudaMallocAsync(&storage->grad_ptr, storage->_size, storage->ctx->stream);
-    cudaMemsetAsync(storage->grad_ptr, 0, storage->_size, storage->ctx->stream);
-  }
-
-  uint N = storage->_elements;
-  const uint BLOCK_SIZE = 32;
-  uint blocks = CEIL_DIV(N, BLOCK_SIZE);
-
-  tensor_accumulate_kernel<<<blocks, BLOCK_SIZE, 0, storage->ctx->stream>>>(
-      top_gradient, storage->grad_ptr, N);
-}
-
-TensorStorage::TensorStorage(size_t elements, MemoryKind kind,
-                             std::shared_ptr<CudaContext> ctx,
-                             const std::vector<float> &data)
-    : _elements(elements), _size(elements * sizeof(float)), kind(kind),
-      ctx(ctx) {
-  if (kind == MemoryKind::Device) {
-    cudaMallocAsync(&data_ptr, _size, ctx->stream);
-
-    if (!data.empty()) {
-      if (data.size() != _elements) {
-        throw std::runtime_error("Error: Data provided as argument to Tensor "
-                                 "is neither empty nor correct size.\n");
-      }
-      cudaMemcpyAsync(data_ptr, data.data(), _size, cudaMemcpyHostToDevice,
-                      ctx->stream);
-    }
-  }
-}
-
-Tensor operator+(const Tensor &a, const Tensor &b) {
-  if (a->getShape() != b->getShape()) {
-    throw std::runtime_error(
-        "Error: Shapes do not match during + operation.\n");
-  }
-
-  auto ctx = a->getCudaContext();
-
-  Tensor result = std::make_shared<TensorObject>(
-      "", a->getShape(), a->hasGradient() || b->hasGradient(),
-      std::make_shared<TensorStorage>(a->noElements(), MemoryKind::Device,
-                                      a->getCudaContext(),
-                                      std::vector<float>{}));
-
-  auto op = std::make_shared<AddOp>();
-  op->setParents({a, b});
-  result->setOperation(op);
-
-  uint N = a->noElements();
-  const uint BLOCK_SIZE = 32;
-  uint blocks = CEIL_DIV(N, BLOCK_SIZE);
-
-  auto A_shape = a->getShape();
-  auto A_strides = a->getStrides();
-  auto B_strides = b->getStrides();
-
-  size_t *shape_A, *strides_A, *strides_B;
-  size_t shape_A_size = A_shape.size() * sizeof(size_t),
-         strides_A_size = A_strides.size() * sizeof(size_t),
-         strides_B_size = B_strides.size() * sizeof(size_t);
-
-  cudaMallocAsync(&shape_A, shape_A_size, ctx->stream);
-  cudaMallocAsync(&strides_A, strides_A_size, ctx->stream);
-  cudaMallocAsync(&strides_B, strides_B_size, ctx->stream);
-
-  cudaMemcpyAsync(shape_A, A_shape.data(), shape_A_size, cudaMemcpyHostToDevice,
-                  ctx->stream);
-  cudaMemcpyAsync(strides_A, A_strides.data(), strides_A_size,
-                  cudaMemcpyHostToDevice, ctx->stream);
-  cudaMemcpyAsync(strides_B, B_strides.data(), strides_B_size,
-                  cudaMemcpyHostToDevice, ctx->stream);
-
-  tensor_add_kernel<<<blocks, BLOCK_SIZE, 0, ctx->stream>>>(
-      a->storage->data_ptr, b->storage->data_ptr, result->storage->data_ptr, N,
-      a->getShape().size(), shape_A, strides_A, strides_B);
-
-  cudaFreeAsync(shape_A, ctx->stream);
-  cudaFreeAsync(strides_A, ctx->stream);
-  cudaFreeAsync(strides_B, ctx->stream);
-  return result;
-}
-
-std::vector<size_t> checkBroadcastable(const std::vector<size_t> &src_shape,
-                                       const std::vector<size_t> &src_strides,
-                                       const std::vector<size_t> &dst_shape) {
-  size_t src_dims = src_shape.size();
-  size_t dst_dims = dst_shape.size();
-
-  if (src_dims > dst_dims)
-    throw std::runtime_error("Error: Cannot broadcast to smaller shape.\n");
-
-  std::vector<size_t> new_strides(dst_dims, 0);
-
-  for (int i = 0; i < dst_dims; i++) {
-    int dst_idx = dst_dims - 1 - i;
-    int src_idx = src_dims - 1 - i;
-
-    if (src_idx >= 0) {
-      size_t src_dim_sz = src_shape[src_idx];
-      size_t dst_dim_sz = dst_shape[dst_idx];
-
-      if (src_dim_sz == dst_dim_sz) {
-        new_strides[dst_idx] = src_strides[src_idx];
-      } else if (src_dim_sz == 1) {
-        new_strides[dst_idx] = 0;
-      } else {
-        throw std::runtime_error(
-            "Error: Shapes are either not broadcastable or are the same.\n");
-      }
-    } else {
-      new_strides[dst_idx] = 0;
-    }
-  }
-
-  return new_strides;
-}
-
-Tensor expand(const Tensor &a, const std::vector<size_t> &target_shape) {
-  std::vector<size_t> new_strides =
-      checkBroadcastable(a->getShape(), a->getStrides(), target_shape);
-
-  auto ctx = a->getCudaContext();
-
-  Tensor result = std::make_shared<TensorObject>(
-      "", target_shape, a->hasGradient(), a->getStorage());
-
-  auto op = std::make_shared<ExpandOp>();
-  op->setParents({a});
-  op->forward_ctx.saved_tensors.push_back(TensorW(result));
-  result->setOperation(op);
-  result->strides = new_strides;
-  return result;
-}
-
-Tensor make_tensor(const std::string &label, const std::vector<size_t> &shape,
-                   bool hasGrad, const std::vector<float> &data,
-                   std::shared_ptr<CudaContext> ctx) {
-  size_t allocated_length = 1;
+  size_t _elements = 1;
   for (size_t s : shape) {
-    allocated_length *= s;
+    _elements *= s;
   }
-  return std::make_shared<TensorObject>(
-      label, shape, hasGrad,
-      std::make_shared<TensorStorage>(allocated_length, MemoryKind::Device, ctx,
-                                      data));
+  size_t _size = _elements * sizeof(float);
+
+  std::vector<float> data(_elements);
+  auto devicePtr = storage->devicePtr();
+  auto cuda_ctx = storage->getCudaContext();
+
+  cudaMemcpyAsync(data.data(), devicePtr, _size, cudaMemcpyDeviceToHost,
+                  cuda_ctx->stream);
+
+  return data;
+}
+
+void TensorObject::accumulateGradient(
+    Tensor top_gradient, std::shared_ptr<CudaContext> cuda_context) {
+  if (!grad_ctx) {
+    throw std::runtime_error("Error: Grad Context does not exist.\n");
+  } else if (!grad_ctx->hasGrad) {
+    throw std::runtime_error("Error: Tensor has `hasGrad` = false.\n");
+  }
+
+  auto grad_tensor = grad_ctx->grad;
+
+  size_t allocated_elements = 1;
+  for (size_t s : shape) {
+    allocated_elements *= s;
+  }
+  size_t allocated_size = allocated_elements * sizeof(float);
+
+  // Lazily allocate
+  if (!grad_tensor) {
+    const std::vector<float> zeros(allocated_elements, 0.0f);
+    grad_ctx->grad =
+        tensor("", shape, zeros, cuda_context, nullptr, false, true);
+  }
+
+  auto top_grad_storage = top_gradient->getStorage();
+
+  auto grad_storage = grad_tensor->getStorage();
+  const size_t BLOCK_SIZE = 32;
+  const size_t BLOCKS = CEIL_DIV(allocated_size, BLOCK_SIZE);
+  tensor_accumulate_kernel<<<BLOCKS, BLOCK_SIZE, 0, cuda_context->stream>>>(
+      top_grad_storage->devicePtr(), grad_storage->devicePtr(), allocated_size);
+}
+
+void TensorObject::freeGradient(std::shared_ptr<CudaContext> cuda_context) {
+  if (!grad_ctx) {
+    throw std::runtime_error("Error: Grad Context does not exist.\n");
+  } else if (!grad_ctx->hasGrad) {
+    throw std::runtime_error("Error: Tensor has `hasGrad` = false.\n");
+  }
+
+  auto grad_tensor = grad_ctx->grad;
+  auto grad_ptr = grad_tensor->getStorage()->devicePtr();
+  if (grad_tensor && grad_ctx->delGrad) {
+    cudaFreeAsync(grad_ptr, cuda_context->stream);
+  }
+}
+
+// Make tensor
+Tensor tensor(const std::string &label, const std::vector<size_t> &shape,
+              const std::vector<float> &data, std::shared_ptr<CudaContext> ctx,
+              std::shared_ptr<Operation> parent_op, bool hasGrad,
+              bool delGrad) {
+
+  size_t allocated_size = sizeof(float);
+  for (size_t s : shape) {
+    allocated_size *= s;
+  }
+
+  auto storage = std::make_shared<TensorStorage>(allocated_size, ctx);
+  if (!data.empty())
+    storage->setData(data);
+
+  auto grad_ctx = std::make_shared<GradContext>(parent_op, hasGrad, delGrad);
+
+  return std::make_shared<TensorObject>(label, shape, storage, grad_ctx);
 }

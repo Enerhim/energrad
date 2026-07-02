@@ -1,5 +1,5 @@
 #pragma once
-#include "cuda_context.cuh"
+#include "context.cuh"
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -7,59 +7,74 @@
 
 #define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
 
-enum class MemoryKind { Host, Device };
 class Operation;
 class TensorObject;
+class GradientMetadata;
 class Engine;
 
 using Tensor = std::shared_ptr<TensorObject>;
 using TensorW = std::weak_ptr<TensorObject>;
 
-struct Context {
-  std::vector<TensorW> saved_tensors;
+class GradContext {
+public:
+  GradContext(std::shared_ptr<Operation> parent_op, bool hasGrad, bool delGrad);
+
+  Tensor grad = nullptr;
+  std::shared_ptr<Operation> op = nullptr;
+
+  bool hasGrad = false;
+  bool delGrad = false;
 };
 
-struct TensorStorage {
+class TensorStorage : public std::enable_shared_from_this<TensorStorage> {
+private:
   float *data_ptr = nullptr;
-  float *grad_ptr = nullptr;
   size_t _size;
   size_t _elements;
+  std::shared_ptr<CudaContext> cuda_ctx;
 
-  MemoryKind kind;
-  std::shared_ptr<CudaContext> ctx;
-  TensorStorage(size_t elements, MemoryKind kind,
-                std::shared_ptr<CudaContext> ctx,
-                const std::vector<float> &data);
+  void setData(const std::vector<float> &data);
+
+public:
+  TensorStorage(size_t allocation_size, std::shared_ptr<CudaContext> ctx);
   ~TensorStorage();
+
+  float *devicePtr() const { return data_ptr; }
+  size_t getSize() const { return _size; }
+  size_t getNumElements() const { return _elements; }
+
+  std::shared_ptr<CudaContext> getCudaContext() const { return cuda_ctx; }
+
+  friend Tensor tensor(const std::string &, const std::vector<size_t> &,
+                       const std::vector<float> &, std::shared_ptr<CudaContext>,
+                       std::shared_ptr<Operation>, bool, bool);
 };
 
 class TensorObject : public std::enable_shared_from_this<TensorObject> {
 
 public:
   TensorObject(const std::string &label, const std::vector<size_t> &shape,
-               bool hasGrad, std::shared_ptr<TensorStorage> storage);
+               std::shared_ptr<TensorStorage> storage,
+               std::shared_ptr<GradContext> grad_ctx);
 
-  float *deviceData() const { return storage->data_ptr; };
-  float *deviceGrad() const { return storage->grad_ptr; };
-
-  std::vector<float> hostBuffer();
-  std::vector<float> hostGradBuffer();
-
+  // Getters
   const std::vector<size_t> &getShape() const { return shape; }
   const std::vector<size_t> &getStrides() const { return strides; }
-  size_t getSize() const;
-  size_t noElements() const;
-  bool hasGradient() const { return hasGrad; }
-  const std::string &getLabel() const { return label; }
-  std::shared_ptr<Operation> getOperation() const { return parent_op; }
-  std::shared_ptr<CudaContext> getCudaContext() const { return storage->ctx; }
+
+  std::shared_ptr<GradContext> getGradContext() const { return grad_ctx; }
   std::shared_ptr<TensorStorage> getStorage() const { return storage; }
 
+  const std::string &getLabel() const { return label; }
+
+  std::vector<float> toHost();
+
+  // Setters
   void setLabel(const std::string &l) { label = l; }
-  void setGrad(const std::vector<float> &data);
-  void zeroGrad();
-  void accumulateGrad(float *top_grad);
-  void setOperation(std::shared_ptr<Operation> op) { parent_op = op; }
+
+  // Backprop
+  void accumulateGradient(Tensor gradient,
+                          std::shared_ptr<CudaContext> cuda_context);
+  void freeGradient(std::shared_ptr<CudaContext> cuda_context);
 
   // Friend ops
   friend Tensor operator+(const Tensor &, const Tensor &);
@@ -70,15 +85,10 @@ private:
   std::vector<size_t> shape;
   std::vector<size_t> strides;
   std::shared_ptr<TensorStorage> storage;
-  bool hasGrad;
+  std::shared_ptr<GradContext> grad_ctx;
   std::string label;
-  std::shared_ptr<Operation> parent_op;
 };
 
-Tensor operator+(const Tensor &a, const Tensor &b);
-Tensor expand(const Tensor &a, const std::vector<size_t> &shape);
-Tensor flatten(const Tensor &a);
-
-Tensor make_tensor(const std::string &label, const std::vector<size_t> &shape,
-                   bool hasGrad, const std::vector<float> &data,
-                   std::shared_ptr<CudaContext> ctx);
+Tensor tensor(const std::string &label, const std::vector<size_t> &shape,
+              const std::vector<float> &data, std::shared_ptr<CudaContext> ctx,
+              std::shared_ptr<Operation> parent_op, bool hasGrad, bool delGrad);

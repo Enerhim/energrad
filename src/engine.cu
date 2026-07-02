@@ -1,35 +1,55 @@
-#include "../include/engine.cuh"
-#include "../include/op.cuh"
+#include "engine.cuh"
+#include "op.cuh"
 #include <queue>
+#include <stdexcept>
 
-__global__ void tensor_set(float fill, float *A, size_t N) {
-  uint idx = blockIdx.x * blockDim.x + threadIdx.x;
+void Engine::count(TensorObject *root) {
 
-  if (idx < N) {
-    A[idx] = fill;
+  if (visited.find(root) != visited.end())
+    return;
+
+  visited.insert(root);
+
+  auto grad_ctx = root->getGradContext();
+  auto op = grad_ctx->op;
+  if (!op)
+    return;
+
+  for (auto &wp : op->getParents()) {
+    if (auto p = wp.lock()) {
+      auto t = p.get();
+      indeg_count[t]++;
+      count(t);
+    }
   }
 }
 
-void Engine::backward(const Tensor &root) {
+void Engine::backward(TensorObject *root) {
+  // Clear bs
   indeg_count.clear();
   visited.clear();
+  indeg_count[root] = 0;
 
-  indeg_count[root.get()] = 0;
-  count(root.get());
+  // Count indegrees
+  count(root);
 
-  size_t N = root->noElements();
-  const uint BLOCK_SIZE = 32;
-  uint blocks = CEIL_DIV(N, BLOCK_SIZE);
-  root->zeroGrad();
-  tensor_set<<<blocks, BLOCK_SIZE, 0, root->getCudaContext()->stream>>>(
-      1.0f, root->deviceGrad(), N);
+  // Set root gradient = 1s;
+  auto root_grad_ctx = root->getGradContext();
+  if (!root_grad_ctx)
+    throw std::runtime_error(
+        "Error: No Grad Context on root tensor during Engine.backward().\n");
+  if (!root_grad_ctx->hasGrad)
+    throw std::runtime_error(
+        "Error: `hasGrad` = false for root tensor during Engine.backward().\n");
 
   std::queue<TensorObject *> q;
 
+  // Building Topological Order
   for (auto it = indeg_count.begin(); it != indeg_count.end(); it++) {
     if (indeg_count[it->first] == 0)
       q.push(it->first);
   }
+
   std::vector<TensorObject *> topo;
 
   while (!q.empty()) {
@@ -37,7 +57,8 @@ void Engine::backward(const Tensor &root) {
     q.pop();
 
     topo.push_back(top);
-    auto op = top->getOperation();
+    auto top_grad_ctx = top->getGradContext();
+    auto op = top_grad_ctx->op;
     if (!op)
       continue;
 
@@ -53,34 +74,31 @@ void Engine::backward(const Tensor &root) {
     }
   }
 
+  // Backward && Accumulate
   for (auto t : topo) {
-    auto op = t->getOperation();
+
+    // get Op of current Tensor
+    auto grad_ctx = t->getGradContext();
+    auto grad_tensor = grad_ctx->grad;
+    auto op = grad_ctx->op;
     if (!op)
       continue;
 
-    auto grad = t->deviceGrad();
-    if (grad == nullptr)
-      continue;
+    auto parents = op->getParents();
+    auto gradients = op->backward(grad_tensor);
 
-    op->backward(grad);
-  }
-}
-
-void Engine::count(TensorObject *root) {
-  if (visited.find(root) != visited.end())
-    return;
-  visited.insert(root);
-
-  auto op = root->getOperation();
-  if (!op)
-    return;
-
-  auto parents = op->getParents();
-  for (auto &wp : parents) {
-    if (auto p = wp.lock()) {
-      auto t = p.get();
-      indeg_count[t]++;
-      count(t);
+    // Accumulate gradients
+    int i = 0;
+    for (auto grad : gradients) {
+      if (!grad)
+        continue;
+      auto p = parents[i].lock();
+      auto p_storage = p->getStorage();
+      p->accumulateGradient(grad, p_storage->getCudaContext());
+      i++;
     }
+    auto t_cuda_context = t->getStorage()->getCudaContext();
+    if (grad_ctx->delGrad)
+      t->freeGradient(t_cuda_context);
   }
 }
