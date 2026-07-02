@@ -6,7 +6,7 @@ Tensor expand(const Tensor &a, const std::vector<size_t> &shape);
 Tensor flatten(const Tensor &a);
 
 struct BackpropContext {
-  std::vector<TensorW> saved_tensors;
+  std::vector<Tensor> saved_tensors;
 };
 
 class Operation {
@@ -18,13 +18,13 @@ public:
   friend Tensor expand(const Tensor &, const std::vector<size_t> &);
   friend Tensor flatten(const Tensor &);
 
-  virtual const std::vector<TensorW> &getParents() const { return parents; }
+  virtual const std::vector<Tensor> &getParents() const { return parents; }
 
 protected:
-  BackpropContext forward_ctx;
-  std::vector<TensorW> parents;
+  std::vector<Tensor> parents;
 
-  void setParents(const std::vector<TensorW> &p) { parents = p; }
+  BackpropContext forward_ctx;
+  void setParents(const std::vector<Tensor> &p) { parents = p; }
 };
 
 // Operation Classes

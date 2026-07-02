@@ -70,20 +70,44 @@ TensorObject::TensorObject(const std::string &label,
 }
 
 std::vector<float> TensorObject::toHost() {
+  size_t ndims = shape.size();
 
-  size_t _elements = 1;
-  for (size_t s : shape) {
-    _elements *= s;
-  }
-  size_t _size = _elements * sizeof(float);
-
-  std::vector<float> data(_elements);
   auto devicePtr = storage->devicePtr();
   auto cuda_ctx = storage->getCudaContext();
+  auto _size = storage->getSize();
+  auto _elements = storage->getNumElements();
 
-  cudaStreamSynchronize(cuda_ctx->stream);
-  cudaMemcpyAsync(data.data(), devicePtr, _size, cudaMemcpyDeviceToHost,
+  std::vector<float> t(_elements);
+  cudaMemcpyAsync(t.data(), devicePtr, _size, cudaMemcpyDeviceToHost,
                   cuda_ctx->stream);
+  cudaStreamSynchronize(cuda_ctx->stream);
+
+  std::vector<float> data;
+  std::vector<int> indices(ndims, 0);
+  size_t increased_no_of_elements = 1;
+  for (auto s : shape) {
+    increased_no_of_elements *= s;
+  }
+
+  for (int i = 0; i < increased_no_of_elements; i++) {
+    int offset = 0;
+
+    for (int k = 0; k < ndims; k++) {
+      offset += strides[k] * indices[k];
+    }
+
+    data.push_back(t[offset]);
+
+    indices[ndims - 1]++;
+    for (int k = ndims - 1; k > 0; k--) {
+      if (indices[k] >= shape[k]) {
+        indices[k] = 0;
+        indices[k - 1]++;
+      } else {
+        break;
+      }
+    }
+  }
 
   return data;
 }
@@ -96,10 +120,14 @@ void allocateGrad(const std::vector<size_t> &shape, float fill,
   for (size_t s : shape) {
     allocated_elements *= s;
   }
+  size_t allocated_size = allocated_elements * sizeof(float);
   // Lazily allocate
   if (!grad_ctx->grad) {
-    const std::vector<float> zeros(allocated_elements, fill);
-    grad_ctx->grad = tensor("", shape, zeros, cuda_ctx, nullptr, false, true);
+    grad_ctx->grad = tensor("", shape, {}, cuda_ctx, nullptr, false, false);
+    // Tensor initialization memsets to 0 so not needed to do that again
+    // auto grad_storage = grad_ctx->grad->getStorage();
+    // cudaMemsetAsync(grad_storage->devicePtr(), 0, allocated_size,
+    //                 cuda_ctx->stream);
   }
 }
 

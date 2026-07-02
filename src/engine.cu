@@ -16,12 +16,10 @@ void Engine::count(TensorObject *root) {
   if (!op)
     return;
 
-  for (auto &wp : op->getParents()) {
-    if (auto p = wp.lock()) {
-      auto t = p.get();
-      indeg_count[t]++;
-      count(t);
-    }
+  for (auto &p : op->getParents()) {
+    auto t = p.get();
+    indeg_count[t]++;
+    count(t);
   }
 }
 
@@ -82,13 +80,11 @@ void Engine::backward(TensorObject *root) {
       continue;
 
     auto parents = op->getParents();
-    for (auto &wp : parents) {
-      if (auto p = wp.lock()) {
-        auto t = p.get();
-        indeg_count[t]--;
-        if (indeg_count[t] == 0) {
-          q.push(t);
-        }
+    for (auto &p : parents) {
+      auto t = p.get();
+      indeg_count[t]--;
+      if (indeg_count[t] == 0) {
+        q.push(t);
       }
     }
   }
@@ -113,7 +109,7 @@ void Engine::backward(TensorObject *root) {
         i++;
         continue;
       }
-      auto p = parents[i].lock();
+      auto p = parents[i];
       auto p_storage = p->getStorage();
       p->accumulateGradient(grad, p_storage->getCudaContext());
       i++;
