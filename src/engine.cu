@@ -1,5 +1,6 @@
 #include "engine.cuh"
 #include "op.cuh"
+#include "tensor.cuh"
 #include <queue>
 #include <stdexcept>
 
@@ -41,6 +42,24 @@ void Engine::backward(TensorObject *root) {
   if (!root_grad_ctx->hasGrad)
     throw std::runtime_error(
         "Error: `hasGrad` = false for root tensor during Engine.backward().\n");
+
+  auto root_storage = root->getStorage();
+  auto root_cuda_ctx = root_storage->getCudaContext();
+  auto root_shape = root->getShape();
+
+  auto root_grad_tensor = root_grad_ctx->grad;
+  if (!root_grad_tensor) {
+    allocateGrad(root_shape, 1.0f, root_grad_ctx, root_cuda_ctx);
+    root_grad_tensor = root_grad_ctx->grad;
+  } else {
+    auto root_grad_shape = root_grad_tensor->getShape();
+    size_t no_elements = 1;
+    for (size_t s : root_grad_shape)
+      no_elements *= s;
+
+    auto root_grad_storage = root_grad_tensor->getStorage();
+    root_grad_storage->setData(std::vector<float>(no_elements, 1.0f));
+  }
 
   std::queue<TensorObject *> q;
 
@@ -90,8 +109,10 @@ void Engine::backward(TensorObject *root) {
     // Accumulate gradients
     int i = 0;
     for (auto grad : gradients) {
-      if (!grad)
+      if (!grad) {
+        i++;
         continue;
+      }
       auto p = parents[i].lock();
       auto p_storage = p->getStorage();
       p->accumulateGradient(grad, p_storage->getCudaContext());

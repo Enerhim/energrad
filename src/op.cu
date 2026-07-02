@@ -88,7 +88,8 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
 
   auto storage_a = a->getStorage();
   auto storage_b = b->getStorage();
-  auto grad_ctx = a->getGradContext();
+  auto grad_ctx_a = a->getGradContext();
+  auto grad_ctx_b = a->getGradContext();
   auto cuda_ctx = storage_a->getCudaContext();
 
   auto a_shape = a->getShape();
@@ -98,8 +99,9 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
   auto shape_strides_b =
       toDeviceShapeStrides(b->getShape(), b->getStrides(), cuda_ctx);
 
-  Tensor result = tensor("", a_shape, {}, cuda_ctx, op, grad_ctx->hasGrad,
-                         grad_ctx->delGrad);
+  Tensor result = tensor("", a_shape, {}, cuda_ctx, op,
+                         grad_ctx_a->hasGrad || grad_ctx_b->hasGrad,
+                         grad_ctx_a->delGrad && grad_ctx_b->delGrad);
 
   auto result_storage = result->getStorage();
 

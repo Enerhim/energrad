@@ -12,7 +12,8 @@ void printTensor(Tensor t) {
     nelements *= s;
   }
 
-  float *data = t->toHost().data();
+  std::vector<float> host_data = t->toHost();
+  float *data = host_data.data();
 
   std::vector<int> indices(ndims, 0);
 
@@ -43,6 +44,15 @@ int main() {
   std::shared_ptr<CudaContext> ctx = std::make_shared<CudaContext>();
   Engine engine;
 
-  Tensor A = tensor("", {2, 2}, {1, 2, 3, 4}, ctx, nullptr, true, true);
+  Tensor A = tensor("", {2, 2}, {1, 2, 3, 4}, ctx, nullptr, true, false);
+  Tensor B = tensor("", {2, 2}, {1, 2, 3, 4}, ctx, nullptr, true, false);
+  auto C = A + B;
+  printTensor(A);
+  printTensor(B);
+  printTensor(C);
+  engine.backward(C.get());
+  printTensor(A->getGradContext()->grad);
+  printTensor(B->getGradContext()->grad);
+  printTensor(C->getGradContext()->grad);
   return 0;
 }

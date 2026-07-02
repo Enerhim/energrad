@@ -38,7 +38,7 @@ void TensorStorage::setData(const std::vector<float> &data) {
   if ((data.size() * sizeof(float)) != _size)
     throw std::runtime_error("Error: Invalid size for setData.\n");
 
-  cudaMemcpyAsync(&data_ptr, data.data(), _size, cudaMemcpyHostToDevice,
+  cudaMemcpyAsync(data_ptr, data.data(), _size, cudaMemcpyHostToDevice,
                   cuda_ctx->stream);
 }
 
@@ -51,7 +51,7 @@ TensorObject::TensorObject(const std::string &label,
     : label(label), shape(shape), storage(storage), grad_ctx(grad_ctx) {
 
   // Check if size of storage = size of shapes
-  size_t size_from_shape = sizeof(size_t);
+  size_t size_from_shape = sizeof(float);
   for (size_t s : shape)
     size_from_shape *= s;
 
@@ -81,10 +81,26 @@ std::vector<float> TensorObject::toHost() {
   auto devicePtr = storage->devicePtr();
   auto cuda_ctx = storage->getCudaContext();
 
+  cudaStreamSynchronize(cuda_ctx->stream);
   cudaMemcpyAsync(data.data(), devicePtr, _size, cudaMemcpyDeviceToHost,
                   cuda_ctx->stream);
 
   return data;
+}
+
+void allocateGrad(const std::vector<size_t> &shape, float fill,
+                  std::shared_ptr<GradContext> grad_ctx,
+                  std::shared_ptr<CudaContext> cuda_ctx) {
+
+  size_t allocated_elements = 1;
+  for (size_t s : shape) {
+    allocated_elements *= s;
+  }
+  // Lazily allocate
+  if (!grad_ctx->grad) {
+    const std::vector<float> zeros(allocated_elements, fill);
+    grad_ctx->grad = tensor("", shape, zeros, cuda_ctx, nullptr, false, true);
+  }
 }
 
 void TensorObject::accumulateGradient(
@@ -95,28 +111,23 @@ void TensorObject::accumulateGradient(
     throw std::runtime_error("Error: Tensor has `hasGrad` = false.\n");
   }
 
+  if (!grad_ctx->grad)
+    allocateGrad(shape, 0.0f, grad_ctx, cuda_context);
   auto grad_tensor = grad_ctx->grad;
 
   size_t allocated_elements = 1;
   for (size_t s : shape) {
     allocated_elements *= s;
   }
-  size_t allocated_size = allocated_elements * sizeof(float);
-
-  // Lazily allocate
-  if (!grad_tensor) {
-    const std::vector<float> zeros(allocated_elements, 0.0f);
-    grad_ctx->grad =
-        tensor("", shape, zeros, cuda_context, nullptr, false, true);
-  }
-
   auto top_grad_storage = top_gradient->getStorage();
-
   auto grad_storage = grad_tensor->getStorage();
+
+  // Call accumulate kernel
   const size_t BLOCK_SIZE = 32;
-  const size_t BLOCKS = CEIL_DIV(allocated_size, BLOCK_SIZE);
+  const size_t BLOCKS = CEIL_DIV(allocated_elements, BLOCK_SIZE);
   tensor_accumulate_kernel<<<BLOCKS, BLOCK_SIZE, 0, cuda_context->stream>>>(
-      top_grad_storage->devicePtr(), grad_storage->devicePtr(), allocated_size);
+      top_grad_storage->devicePtr(), grad_storage->devicePtr(),
+      allocated_elements);
 }
 
 void TensorObject::freeGradient(std::shared_ptr<CudaContext> cuda_context) {
@@ -126,10 +137,8 @@ void TensorObject::freeGradient(std::shared_ptr<CudaContext> cuda_context) {
     throw std::runtime_error("Error: Tensor has `hasGrad` = false.\n");
   }
 
-  auto grad_tensor = grad_ctx->grad;
-  auto grad_ptr = grad_tensor->getStorage()->devicePtr();
-  if (grad_tensor && grad_ctx->delGrad) {
-    cudaFreeAsync(grad_ptr, cuda_context->stream);
+  if (grad_ctx->delGrad) {
+    grad_ctx->grad = nullptr;
   }
 }
 

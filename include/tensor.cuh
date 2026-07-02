@@ -45,6 +45,7 @@ public:
 
   std::shared_ptr<CudaContext> getCudaContext() const { return cuda_ctx; }
 
+  friend Engine;
   friend Tensor tensor(const std::string &, const std::vector<size_t> &,
                        const std::vector<float> &, std::shared_ptr<CudaContext>,
                        std::shared_ptr<Operation>, bool, bool);
@@ -88,7 +89,9 @@ private:
   std::shared_ptr<GradContext> grad_ctx;
   std::string label;
 };
-
+void allocateGrad(const std::vector<size_t> &shape, float fill,
+                  std::shared_ptr<GradContext> grad_ctx,
+                  std::shared_ptr<CudaContext> cuda_ctx);
 Tensor tensor(const std::string &label, const std::vector<size_t> &shape,
               const std::vector<float> &data, std::shared_ptr<CudaContext> ctx,
               std::shared_ptr<Operation> parent_op, bool hasGrad, bool delGrad);
