@@ -4,9 +4,11 @@
 Tensor operator+(const Tensor &a, const Tensor &b);
 Tensor expand(const Tensor &a, const std::vector<size_t> &shape);
 Tensor flatten(const Tensor &a);
+Tensor transpose(const Tensor &a, size_t dim_i, size_t dim_j);
 
 struct BackpropContext {
   std::vector<Tensor> saved_tensors;
+  std::vector<float> saved_floats;
 };
 
 class Operation {
@@ -17,6 +19,7 @@ public:
   friend Tensor operator+(const Tensor &, const Tensor &);
   friend Tensor expand(const Tensor &, const std::vector<size_t> &);
   friend Tensor flatten(const Tensor &);
+  friend Tensor transpose(const Tensor &, size_t, size_t);
 
   virtual const std::vector<Tensor> &getParents() const { return parents; }
 
@@ -35,6 +38,11 @@ public:
 };
 
 class ExpandOp : public Operation {
+public:
+  std::vector<Tensor> backward(Tensor top_gradient) override;
+};
+
+class TransposeOp : public Operation {
 public:
   std::vector<Tensor> backward(Tensor top_gradient) override;
 };

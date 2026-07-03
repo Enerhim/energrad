@@ -49,15 +49,14 @@ void Engine::backward(TensorObject *root) {
   if (!root_grad_tensor) {
     allocateGrad(root_shape, 1.0f, root_grad_ctx, root_cuda_ctx);
     root_grad_tensor = root_grad_ctx->grad;
-  } else {
-    auto root_grad_shape = root_grad_tensor->getShape();
-    size_t no_elements = 1;
-    for (size_t s : root_grad_shape)
-      no_elements *= s;
-
-    auto root_grad_storage = root_grad_tensor->getStorage();
-    root_grad_storage->setData(std::vector<float>(no_elements, 1.0f));
   }
+  auto root_grad_shape = root_grad_tensor->getShape();
+  size_t no_elements = 1;
+  for (size_t s : root_grad_shape)
+    no_elements *= s;
+
+  auto root_grad_storage = root_grad_tensor->getStorage();
+  root_grad_storage->setData(std::vector<float>(no_elements, 1.0f));
 
   std::queue<TensorObject *> q;
 

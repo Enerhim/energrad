@@ -1,7 +1,6 @@
 #pragma once
 #include "context.cuh"
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -67,20 +66,18 @@ public:
 
   const std::string &getLabel() const { return label; }
 
-  std::vector<float> toHost();
+  bool checkContiguous() const;
 
   // Setters
   void setLabel(const std::string &l) { label = l; }
+  void setStrides(const std::vector<size_t> &s) { strides = s; }
+  void setStorage(std::shared_ptr<TensorStorage> s) { storage = s; }
+  std::vector<float> toHost();
 
   // Backprop
   void accumulateGradient(Tensor gradient,
                           std::shared_ptr<CudaContext> cuda_context);
   void freeGradient(std::shared_ptr<CudaContext> cuda_context);
-
-  // Friend ops
-  friend Tensor operator+(const Tensor &, const Tensor &);
-  friend Tensor expand(const Tensor &, const std::vector<size_t> &);
-  friend Tensor flatten(const Tensor &a);
 
 private:
   std::vector<size_t> shape;

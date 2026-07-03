@@ -2,11 +2,25 @@
 #include <stdexcept>
 
 // CUDA Kernels
-__global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N) {
-  uint idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < N) {
-    B[idx] += A[idx];
+__global__ void tensor_accumulate_kernel(const float *A, float *B, size_t N,
+                                         size_t ndim, const size_t *shape_A,
+                                         const size_t *strides_A) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (idx >= N)
+    return;
+
+  size_t remaining = idx;
+  size_t offset = 0;
+
+  for (int dim = ndim - 1; dim >= 0; --dim) {
+    size_t coord = remaining % shape_A[dim];
+    remaining /= shape_A[dim];
+
+    offset += coord * strides_A[dim];
   }
+
+  B[idx] += A[offset];
 }
 
 // Grad Context
@@ -112,6 +126,17 @@ std::vector<float> TensorObject::toHost() {
   return data;
 }
 
+bool TensorObject::checkContiguous() const {
+  size_t expected_stride = 1;
+  for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i) {
+    if (shape[i] != 1 && strides[i] != expected_stride)
+      return false;
+
+    expected_stride *= shape[i];
+  }
+  return true;
+}
+
 void allocateGrad(const std::vector<size_t> &shape, float fill,
                   std::shared_ptr<GradContext> grad_ctx,
                   std::shared_ptr<CudaContext> cuda_ctx) {
@@ -120,7 +145,7 @@ void allocateGrad(const std::vector<size_t> &shape, float fill,
   for (size_t s : shape) {
     allocated_elements *= s;
   }
-  size_t allocated_size = allocated_elements * sizeof(float);
+  // size_t allocated_size = allocated_elements * sizeof(float);
   // Lazily allocate
   if (!grad_ctx->grad) {
     grad_ctx->grad = tensor("", shape, {}, cuda_ctx, nullptr, false, false);
@@ -130,6 +155,13 @@ void allocateGrad(const std::vector<size_t> &shape, float fill,
     //                 cuda_ctx->stream);
   }
 }
+// Utils
+std::vector<size_t *>
+toDeviceShapeStrides(const std::vector<size_t> &shape,
+                     const std::vector<size_t> &strides,
+                     std::shared_ptr<CudaContext> cuda_ctx);
+void freeShapeStrides(std::vector<size_t *> shape_strides_ptr,
+                      std::shared_ptr<CudaContext> cuda_ctx);
 
 void TensorObject::accumulateGradient(
     Tensor top_gradient, std::shared_ptr<CudaContext> cuda_context) {
@@ -141,21 +173,28 @@ void TensorObject::accumulateGradient(
 
   if (!grad_ctx->grad)
     allocateGrad(shape, 0.0f, grad_ctx, cuda_context);
+
   auto grad_tensor = grad_ctx->grad;
 
-  size_t allocated_elements = 1;
+  size_t N = 1;
   for (size_t s : shape) {
-    allocated_elements *= s;
+    N *= s;
   }
   auto top_grad_storage = top_gradient->getStorage();
   auto grad_storage = grad_tensor->getStorage();
 
+  auto top_gradient_shape = top_gradient->getShape();
+  auto top_gradient_shit = toDeviceShapeStrides(
+      top_gradient_shape, top_gradient->getStrides(), cuda_context);
+
   // Call accumulate kernel
   const size_t BLOCK_SIZE = 32;
-  const size_t BLOCKS = CEIL_DIV(allocated_elements, BLOCK_SIZE);
+  const size_t BLOCKS = CEIL_DIV(N, BLOCK_SIZE);
   tensor_accumulate_kernel<<<BLOCKS, BLOCK_SIZE, 0, cuda_context->stream>>>(
-      top_grad_storage->devicePtr(), grad_storage->devicePtr(),
-      allocated_elements);
+      top_grad_storage->devicePtr(), grad_storage->devicePtr(), N,
+      top_gradient_shape.size(), top_gradient_shit[0], top_gradient_shit[1]);
+
+  freeShapeStrides(top_gradient_shit, cuda_context);
 }
 
 void TensorObject::freeGradient(std::shared_ptr<CudaContext> cuda_context) {

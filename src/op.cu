@@ -1,29 +1,29 @@
 #include "op.cuh"
 #include "tensor.cuh"
-
+#include <stdexcept>
 // CUDA Kernels
 
-__global__ void tensor_expand_backward_kernel(const float *top_gradient,
-                                              float *gradient, size_t ndim,
-                                              size_t N, const size_t *Y_shape,
-                                              const size_t *Y_strides) {
-
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  size_t remaining = idx;
-
-  size_t offset = 0;
-
+__global__ void tensor_expand_backward_kernel(const float *dY, float *dX,
+                                              size_t ndim, size_t N,
+                                              const size_t *Y_shape,
+                                              const size_t *dY_strides,
+                                              const size_t *dX_strides) {
+  size_t idx = blockDim.x * blockIdx.x + threadIdx.x;
   if (idx >= N)
     return;
 
+  size_t remaining = idx;
+
+  size_t offset_dY = 0, offset_dX = 0;
   for (int dim = ndim - 1; dim >= 0; --dim) {
     size_t coord = remaining % Y_shape[dim];
     remaining /= Y_shape[dim];
 
-    offset += coord * Y_strides[dim];
+    offset_dX += coord * dX_strides[dim];
+    offset_dY += coord * dY_strides[dim];
   }
 
-  atomicAdd(&gradient[offset], top_gradient[idx]);
+  atomicAdd(&dX[offset_dX], dY[offset_dY]);
 }
 
 __global__ void tensor_add_kernel(const float *A, const float *B, float *C,
@@ -148,7 +148,7 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
 
   auto result_storage = result->getStorage();
 
-  uint N = storage_a->getNumElements();
+  size_t N = storage_a->getNumElements();
   const size_t BLOCK_SIZE = 32;
   const size_t BLOCKS = CEIL_DIV(N, BLOCK_SIZE);
 
@@ -164,7 +164,6 @@ Tensor operator+(const Tensor &a, const Tensor &b) {
 }
 
 Tensor expand(const Tensor &A, const std::vector<size_t> &new_shape) {
-
   auto A_shape = A->getShape();
   if (!checkBroadcastable(A_shape, new_shape)) {
     throw std::runtime_error("Error: Can not broadcast to new shape..\n");
@@ -181,11 +180,39 @@ Tensor expand(const Tensor &A, const std::vector<size_t> &new_shape) {
 
   auto result = tensor("", new_shape, {}, cuda_context, op, A_grad_ctx->hasGrad,
                        A_grad_ctx->delGrad);
-  result->storage = A_storage;
-  result->strides = new_strides;
+  result->setStrides(new_strides);
+  result->setStorage(A_storage);
 
   op->forward_ctx.saved_tensors.push_back(A);
   op->forward_ctx.saved_tensors.push_back(result);
+
+  return result;
+}
+
+Tensor transpose(const Tensor &A, size_t dim_i, size_t dim_j) {
+  auto A_shape = A->getShape();
+  auto A_strides = A->getStrides();
+  auto A_storage = A->getStorage();
+  auto A_grad_ctx = A->getGradContext();
+  auto cuda_context = A_storage->getCudaContext();
+  auto n_dims = A_shape.size();
+  if (dim_i >= n_dims || dim_j >= n_dims)
+    throw std::runtime_error("Error: Transpose dims out of bounds\n.");
+
+  std::swap(A_shape[dim_i], A_shape[dim_j]);
+  std::swap(A_strides[dim_i], A_strides[dim_j]);
+
+  auto op = std::make_shared<TransposeOp>();
+  op->setParents({A});
+
+  auto result = tensor("", A_shape, {}, cuda_context, op, A_grad_ctx->hasGrad,
+                       A_grad_ctx->delGrad);
+
+  result->setStrides(A_strides);
+  result->setStorage(A_storage);
+
+  op->forward_ctx.saved_floats.push_back(dim_i);
+  op->forward_ctx.saved_floats.push_back(dim_j);
 
   return result;
 }
@@ -196,31 +223,65 @@ std::vector<Tensor> AddOp::backward(Tensor top_gradient) {
   return {top_gradient, top_gradient};
 }
 
-std::vector<Tensor> ExpandOp::backward(Tensor top_gradient) {
-
+// TODO: Reanalyze and rewrite step by step to understand this again thoroughly.
+std::vector<Tensor> ExpandOp::backward(Tensor dY) {
   auto X = forward_ctx.saved_tensors[0];
   auto Y = forward_ctx.saved_tensors[1];
 
   auto X_shape = X->getShape();
-  auto dim_in = X_shape.size();
-  auto storage_X = X->getStorage();
+  auto Y_shape = Y->getShape();
+  auto X_storage = X->getStorage();
+  auto cuda_ctx_X = X_storage->getCudaContext();
 
-  auto storage_Y = Y->getStorage();
-  uint N = storage_Y->getNumElements();
+  size_t N = 1;
+  for (auto s : Y_shape)
+    N *= s;
+  size_t ndim = Y_shape.size();
+  size_t BLOCK_SIZE = 32;
+  size_t BLOCKS = CEIL_DIV(N, BLOCK_SIZE);
 
-  auto shape_strides_Y = toDeviceShapeStrides(Y->getShape(), Y->getStrides(),
-                                              storage_Y->getCudaContext());
-  const size_t BLOCK_SIZE = 32;
-  const size_t BLOCKS = CEIL_DIV(N, BLOCK_SIZE);
+  auto dX = tensor("", X_shape, {}, cuda_ctx_X, nullptr, false, true);
 
-  Tensor gradient = tensor("", X_shape, {}, storage_X->getCudaContext(),
-                           nullptr, false, false);
+  std::vector<size_t> X_contiguous_strides(X_shape.size());
+  size_t stride = 1;
+  for (int i = static_cast<int>(X_shape.size()) - 1; i >= 0; i--) {
+    X_contiguous_strides[i] = stride;
+    stride *= X_shape[i];
+  }
 
-  tensor_expand_backward_kernel<<<BLOCKS, BLOCK_SIZE, 0,
-                                  storage_X->getCudaContext()->stream>>>(
-      top_gradient->getStorage()->devicePtr(),
-      gradient->getStorage()->devicePtr(), dim_in, N, shape_strides_Y[0],
-      shape_strides_Y[1]);
+  auto dX_m_strides = broadcastStrides(X_shape, Y_shape, X_contiguous_strides);
 
-  return {};
+  auto Y_dX_device = toDeviceShapeStrides(Y_shape, dX_m_strides, cuda_ctx_X);
+  auto Y_dY_device =
+      toDeviceShapeStrides(Y_shape, dY->getStrides(), cuda_ctx_X);
+  auto dY_ptr = dY->getStorage()->devicePtr();
+  auto dX_ptr = dX->getStorage()->devicePtr();
+  tensor_expand_backward_kernel<<<BLOCKS, BLOCK_SIZE, 0, cuda_ctx_X->stream>>>(
+      dY_ptr, dX_ptr, ndim, N, Y_dY_device[0], Y_dY_device[1], Y_dX_device[1]);
+
+  freeShapeStrides(Y_dX_device, cuda_ctx_X);
+  freeShapeStrides(Y_dY_device, cuda_ctx_X);
+
+  return {dX};
+}
+
+std::vector<Tensor> TransposeOp::backward(Tensor dY) {
+  auto dY_shape = dY->getShape();
+  auto dY_strides = dY->getStrides();
+  auto dY_storage = dY->getStorage();
+
+  auto dim_i = forward_ctx.saved_floats[0];
+  auto dim_j = forward_ctx.saved_floats[1];
+
+  auto cuda_context = dY_storage->getCudaContext();
+  auto n_dims = dY_shape.size();
+
+  std::swap(dY_shape[dim_i], dY_shape[dim_j]);
+  std::swap(dY_strides[dim_i], dY_strides[dim_j]);
+
+  auto result = tensor("", dY_shape, {}, cuda_context, nullptr, false, true);
+
+  result->setStrides(dY_strides);
+  result->setStorage(dY_storage);
+  return {result};
 }
