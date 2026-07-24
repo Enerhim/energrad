@@ -345,8 +345,11 @@ Tensor TensorAdd(Tensor A, Tensor B) {
          elementsB = calculateLogicalElementNo(shapeB, B->rank);
 
   if (shapeA != shapeB) {
-    return nullptr;
+    if (checkBroadcastable(A, B)) {
+      A = TensorBroadcast(A, B->shape);
+    }
   }
+
   TensorMeta metaA(rankA, elementsA, shapeA, stridesA);
   TensorMeta metaB(rankB, elementsB, shapeB, stridesB);
 
@@ -356,8 +359,6 @@ Tensor TensorAdd(Tensor A, Tensor B) {
   auto result =
       std::make_shared<TensorView>(std::span<size_t>(shapeA.data(), rankA));
   result->storage = storageResult;
-
-  // TODO: Broadcast if in scope
 
   switch (deviceA) {
   case StorageDevice::CPU:
@@ -393,8 +394,11 @@ Tensor TensorSub(Tensor A, Tensor B) {
          elementsB = calculateLogicalElementNo(shapeB, B->rank);
 
   if (shapeA != shapeB) {
-    return nullptr;
+    if (checkBroadcastable(A, B)) {
+      A = TensorBroadcast(A, B->shape);
+    }
   }
+
   // Make result
   auto storageResult =
       std::make_shared<TensorStorage>(elementsA * sizeof(float), deviceA);
