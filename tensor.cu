@@ -95,6 +95,7 @@ Tensor TensorTanh(Tensor A);
 Tensor TensorAdd(Tensor A, Tensor B);
 Tensor TensorSub(Tensor A, Tensor B);
 
+Tensor TensorMul(Tensor A, Tensor B);
 Tensor TensorMatmul(Tensor A, Tensor B, bool AT = false, bool BT = false);
 Tensor TensorSoftmax(Tensor A);
 
@@ -103,6 +104,7 @@ Tensor TensorSoftmax(Tensor A);
 Tensor TensorTranspose(Tensor A, size_t dim1, size_t dim2);
 Tensor TensorBroadcast(Tensor A, std::span<size_t> targetShape);
 Tensor TensorContiguous(Tensor A);
+
 void CPU_TensorFill(float *dataA, TensorMeta &metaA);
 void CPU_TensorScale(float *dataA, TensorMeta &metaA, float scalar,
                      float *dataResult);
@@ -113,6 +115,8 @@ void CPU_TensorTanh(float *dataA, TensorMeta &metaA, float *dataResult);
 void CPU_TensorAdd(float *dataA, TensorMeta &metaA, float *dataB,
                    TensorMeta &metaB, float *dataResult);
 void CPU_TensorSub(float *dataA, TensorMeta &metaA, float *dataB,
+                   TensorMeta &metaB, float *dataResult);
+void CPU_TensorMul(float *dataA, TensorMeta &metaA, float *dataB,
                    TensorMeta &metaB, float *dataResult);
 
 void CPU_TensorMatmulRR(float *dataA, TensorMeta &metaA, float *dataB,
@@ -217,6 +221,7 @@ Tensor TensorInit(std::vector<size_t> &shape, float a, StorageDevice device) {
 
   return result;
 }
+
 Tensor TensorCopy(Tensor A, bool newStorage) {
   auto result = std::make_shared<TensorView>(A->shape);
   auto storageA = A->storage;
@@ -415,6 +420,56 @@ Tensor TensorSub(Tensor A, Tensor B) {
     // TODO: Optimization: Check if contiguous, in which case run the super
     // simple kernel - both fore CUDA and CPU
     CPU_TensorSub(dataA, metaA, dataB, metaB, storageResult->data);
+    break;
+  case StorageDevice::CUDA:
+    // Call GPU Kernel
+    break;
+  }
+
+  return result;
+}
+
+Tensor TensorMul(Tensor A, Tensor B) {
+  auto storageA = A->storage, storageB = B->storage;
+  auto dataA = storageA->data, dataB = storageB->data;
+  auto rankA = A->rank, rankB = B->rank;
+  // If different devices, move to the device of the first matrix
+  auto deviceA = storageA->device;
+  if (deviceA != storageB->device) {
+    TensorMoveDevice(B, deviceA);
+    storageB = B->storage;
+    dataB = storageB->data;
+  }
+
+  // Create Meta
+  auto shapeA = A->shape, stridesA = A->strides, shapeB = B->shape,
+       stridesB = B->strides;
+
+  size_t elementsA = calculateLogicalElementNo(shapeA, rankA),
+         elementsB = calculateLogicalElementNo(shapeB, B->rank);
+
+  if (shapeA != shapeB) {
+    if (checkBroadcastable(A, B)) {
+      A = TensorBroadcast(A, B->shape);
+    }
+  }
+
+  // Make result
+  auto storageResult =
+      std::make_shared<TensorStorage>(elementsA * sizeof(float), deviceA);
+  auto result =
+      std::make_shared<TensorView>(std::span<size_t>(shapeA.data(), rankA));
+  result->storage = storageResult;
+  // TODO: Broadcast if in scope
+
+  TensorMeta metaA(rankA, elementsA, shapeA, stridesA);
+  TensorMeta metaB(rankB, elementsB, shapeB, stridesB);
+
+  switch (deviceA) {
+  case StorageDevice::CPU:
+    // TODO: Optimization: Check if contiguous, in which case run the super
+    // simple kernel - both fore CUDA and CPU
+    CPU_TensorMul(dataA, metaA, dataB, metaB, storageResult->data);
     break;
   case StorageDevice::CUDA:
     // Call GPU Kernel
@@ -715,6 +770,26 @@ void CPU_TensorSub(float *dataA, TensorMeta &metaA, float *dataB,
     }
 
     dataResult[idx] = dataA[offsetA] - dataB[offsetB];
+  }
+}
+
+void CPU_TensorMul(float *dataA, TensorMeta &metaA, float *dataB,
+                   TensorMeta &metaB, float *dataResult) {
+  size_t ndim = metaA.ndims;
+  for (size_t idx = 0; idx < metaA.elements; idx++) {
+    size_t offsetA = 0;
+    size_t offsetB = 0;
+    size_t remaining = idx;
+
+    for (int dim = static_cast<int>(ndim) - 1; dim >= 0; dim--) {
+      size_t dim_size = metaA.shape[dim];
+      size_t indice = remaining % dim_size;
+      remaining /= dim_size;
+
+      offsetA += indice * metaA.strides[dim];
+      offsetB += indice * metaB.strides[dim];
+    }
+    dataResult[idx] = dataA[offsetA] * dataB[offsetB];
   }
 }
 

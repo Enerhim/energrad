@@ -1,11 +1,11 @@
 #include "tensor.cu"
-#include <type_traits>
+#include <algorithm>
 
 class Node;
 using NodePtr = std::shared_ptr<Node>;
 
 #define MAX_NODE_INPUTS 2
-
+#define MAX_NODE_PARAMS 2
 // Nodes
 
 typedef enum {
@@ -46,6 +46,7 @@ public:
 
   size_t numInputs = 0;
   std::shared_ptr<Node> inputs[MAX_NODE_INPUTS];
+  float params[MAX_NODE_PARAMS];
   NodeOp op;
 };
 
@@ -62,7 +63,19 @@ NodePtr NodeSoftmax(NodePtr A, int flags);
 
 NodePtr NodeAdd(NodePtr A, NodePtr B, int flags);
 NodePtr NodeSub(NodePtr A, NodePtr B, int flags);
+NodePtr NodeMul(NodePtr A, NodePtr B, int flags);
 NodePtr NodeMatmul(NodePtr A, NodePtr B, int flags);
+
+// Backward API
+
+void NodeScaleBackward(NodePtr current);
+void NodeReluBackward(NodePtr current);
+void NodeTanhBackward(NodePtr current);
+void NodeSoftmaxBackward(NodePtr current);
+void NodeAddBackward(NodePtr current);
+void NodeSubBackward(NodePtr current);
+void NodeMulBackward(NodePtr current);
+void NodeMatmulBackward(NodePtr current);
 
 // Impl
 
@@ -86,6 +99,7 @@ NodePtr NodeScale(NodePtr A, float scalar, int flags) {
   result->inputs[0] = A;
   result->op = NodeOp::NODE_OP_SCALE;
   result->numInputs = NODE_NUM_INPUTS(result->op);
+  result->params[0] = scalar;
   return result;
 }
 
@@ -182,3 +196,33 @@ NodePtr NodeMatmul(NodePtr A, NodePtr B, int flags) {
   result->numInputs = NODE_NUM_INPUTS(result->op);
   return result;
 }
+
+std::vector<size_t> arrToVec(std::array<size_t, MAX_DIMS> arr, size_t rank) {
+  std::vector<size_t> vec(rank);
+  std::copy(arr.begin(), arr.begin() + rank, vec.begin());
+  return vec;
+}
+
+void NodeScaleBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto v = current->value;
+
+  if (!pA->grad) {
+    auto vA = pA->value;
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, vA->storage->device);
+  }
+
+  std::vector<size_t> vecShape = arrToVec(v->shape, v->rank);
+  auto scalarMatrix =
+      TensorInit(vecShape, current->params[0], v->storage->device);
+
+  pA->grad = TensorAdd(pA->grad, TensorMul(current->grad, scalarMatrix));
+}
+void NodeReluBackward(NodePtr current);
+void NodeTanhBackward(NodePtr current);
+void NodeSoftmaxBackward(NodePtr current);
+void NodeAddBackward(NodePtr current);
+void NodeSubBackward(NodePtr current);
+void NodeMulBackward(NodePtr current);
+void NodeMatmulBackward(NodePtr current, Tensor incoming);
