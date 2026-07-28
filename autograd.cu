@@ -1,5 +1,4 @@
 #include "tensor.cu"
-#include <algorithm>
 
 class Node;
 using NodePtr = std::shared_ptr<Node>;
@@ -7,6 +6,8 @@ using NodePtr = std::shared_ptr<Node>;
 #define MAX_NODE_INPUTS 2
 #define MAX_NODE_PARAMS 2
 // Nodes
+
+// TODO: Softmax, ReLU Backward, Matmul
 
 typedef enum {
   NODE_FLAG_NONE = 0,
@@ -197,18 +198,12 @@ NodePtr NodeMatmul(NodePtr A, NodePtr B, int flags) {
   return result;
 }
 
-std::vector<size_t> arrToVec(std::array<size_t, MAX_DIMS> arr, size_t rank) {
-  std::vector<size_t> vec(rank);
-  std::copy(arr.begin(), arr.begin() + rank, vec.begin());
-  return vec;
-}
-
 void NodeScaleBackward(NodePtr current) {
   auto pA = current->inputs[0];
+  auto vA = pA->value;
   auto v = current->value;
 
   if (!pA->grad) {
-    auto vA = pA->value;
     std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
     pA->grad = TensorInit(vecShape, 0.0f, vA->storage->device);
   }
@@ -219,10 +214,110 @@ void NodeScaleBackward(NodePtr current) {
 
   pA->grad = TensorAdd(pA->grad, TensorMul(current->grad, scalarMatrix));
 }
-void NodeReluBackward(NodePtr current);
-void NodeTanhBackward(NodePtr current);
+
+void NodeReluBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto vA = pA->value;
+  auto v = current->value;
+  auto device = v->storage->device;
+
+  if (!pA->grad) {
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, device);
+  }
+  // Custom kernel I suppose
+  pA->grad;
+}
+
+void NodeTanhBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto vA = pA->value;
+  auto v = current->value;
+  auto device = v->storage->device;
+  if (!pA->grad) {
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  std::vector<size_t> vecShape = arrToVec(v->shape, v->rank);
+  pA->grad = TensorAdd(
+      pA->grad,
+      TensorMul(TensorSub(TensorOnes(vecShape, device), TensorMul(vA, vA)),
+                current->grad));
+}
+
 void NodeSoftmaxBackward(NodePtr current);
-void NodeAddBackward(NodePtr current);
-void NodeSubBackward(NodePtr current);
-void NodeMulBackward(NodePtr current);
+
+void NodeAddBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto vA = pA->value;
+
+  auto pB = current->inputs[1];
+  auto vB = pB->value;
+
+  auto v = current->value;
+  auto device = v->storage->device;
+
+  if (!pA->grad) {
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  if (!pB->grad) {
+    std::vector<size_t> vecShape = arrToVec(vB->shape, vB->rank);
+    pB->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  pA->grad = TensorAdd(pA->grad, current->grad);
+  pB->grad = TensorAdd(pB->grad, current->grad);
+}
+
+void NodeSubBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto vA = pA->value;
+
+  auto pB = current->inputs[1];
+  auto vB = pB->value;
+
+  auto v = current->value;
+  auto device = v->storage->device;
+
+  if (!pA->grad) {
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  if (!pB->grad) {
+    std::vector<size_t> vecShape = arrToVec(vB->shape, vB->rank);
+    pB->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  pA->grad = TensorAdd(pA->grad, current->grad);
+  pB->grad = TensorAdd(pB->grad, TensorScale(current->grad, -1.0f));
+}
+
+void NodeMulBackward(NodePtr current) {
+  auto pA = current->inputs[0];
+  auto vA = pA->value;
+
+  auto pB = current->inputs[1];
+  auto vB = pB->value;
+
+  auto v = current->value;
+  auto device = v->storage->device;
+
+  if (!pA->grad) {
+    std::vector<size_t> vecShape = arrToVec(vA->shape, vA->rank);
+    pA->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  if (!pB->grad) {
+    std::vector<size_t> vecShape = arrToVec(vB->shape, vB->rank);
+    pB->grad = TensorInit(vecShape, 0.0f, device);
+  }
+
+  pA->grad = TensorAdd(pA->grad, TensorMul(current->grad, vB));
+  pB->grad = TensorAdd(pB->grad, TensorMul(current->grad, vA));
+}
+
 void NodeMatmulBackward(NodePtr current, Tensor incoming);

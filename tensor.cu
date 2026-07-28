@@ -83,6 +83,9 @@ Tensor TensorLoad(std::string filename);
 void TensorSave(Tensor A, std::string filename);
 
 Tensor TensorInit(std::vector<size_t> &shape, float a, StorageDevice device);
+Tensor TensorOnes(std::vector<size_t> &shape, StorageDevice device);
+Tensor TensorZeros(std::vector<size_t> &shape, StorageDevice device);
+
 Tensor TensorCopy(Tensor A, bool newStorage = false);
 void TensorMoveDevice(Tensor A, StorageDevice device);
 
@@ -131,6 +134,20 @@ void CPU_TensorMatmulTT(float *dataA, TensorMeta &metaA, float *dataB,
 void CPU_TensorSoftmax(float *dataA, TensorMeta &metaA, float *dataResult);
 
 // Utils
+
+bool checkBroadcastable(Tensor A, Tensor target);
+size_t calculateLogicalElementNo(std::array<size_t, MAX_DIMS> &shape,
+                                 size_t rank);
+std::vector<size_t> arrToVec(std::array<size_t, MAX_DIMS> arr, size_t rank);
+bool checkContiguous(Tensor A);
+void print(Tensor A);
+
+std::vector<size_t> arrToVec(std::array<size_t, MAX_DIMS> arr, size_t rank) {
+  std::vector<size_t> vec(rank);
+  std::copy(arr.begin(), arr.begin() + rank, vec.begin());
+  return vec;
+}
+
 bool checkBroadcastable(Tensor A, Tensor target) {
   auto shapeA = A->shape, shapeTarget = target->shape;
   auto rankA = A->rank, rankTarget = target->rank;
@@ -220,6 +237,14 @@ Tensor TensorInit(std::vector<size_t> &shape, float a, StorageDevice device) {
   }
 
   return result;
+}
+
+Tensor TensorOnes(std::vector<size_t> &shape, StorageDevice device) {
+  return TensorInit(shape, 1.0f, device);
+}
+
+Tensor TensorZeros(std::vector<size_t> &shape, StorageDevice device) {
+  return TensorInit(shape, 1.0f, device);
 }
 
 Tensor TensorCopy(Tensor A, bool newStorage) {
