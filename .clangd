@@ -3,6 +3,6 @@ CompileFlags:
     - "-forward-unknown-to-host-compiler"
     - "--generate-code*"
     - "-rdc=true"
-
+    - "-arch=native"
   Add:
     - "-std=c++20"

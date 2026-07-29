@@ -8,6 +8,8 @@ using NodePtr = std::shared_ptr<Node>;
 // Nodes
 
 // TODO: Softmax, ReLU Backward, Matmul
+// TODO: Inplace accumulation
+//
 
 typedef enum {
   NODE_FLAG_NONE = 0,
@@ -208,11 +210,7 @@ void NodeScaleBackward(NodePtr current) {
     pA->grad = TensorInit(vecShape, 0.0f, vA->storage->device);
   }
 
-  std::vector<size_t> vecShape = arrToVec(v->shape, v->rank);
-  auto scalarMatrix =
-      TensorInit(vecShape, current->params[0], v->storage->device);
-
-  pA->grad = TensorAdd(pA->grad, TensorMul(current->grad, scalarMatrix));
+  pA->grad = TensorScale(current->grad, current->params[0]);
 }
 
 void NodeReluBackward(NodePtr current) {
