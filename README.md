@@ -4,6 +4,7 @@ An autograd engine in CUDA
 
 ### Project Structure
 
+```
 .
 ├── CMakeLists.txt
 ├── include
@@ -21,6 +22,8 @@ An autograd engine in CUDA
     ├── tensor.cu
     └── utils.cu
 
+
+```
 ### Build
 
 `git clone https://github.com/Enerhim/energrad.gir .`
