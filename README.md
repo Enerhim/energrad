@@ -21,12 +21,10 @@ An autograd engine in CUDA
     │       └── unary_ops.cu
     ├── tensor.cu
     └── utils.cu
-
-
 ```
 ### Build
 
-`git clone https://github.com/Enerhim/energrad.gir .`
+`git clone https://github.com/Enerhim/energrad.git .`
 
 `cmake -S . -B build -G Ninja`
 
