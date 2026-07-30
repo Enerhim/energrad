@@ -1,5 +1,4 @@
-#include "../include/tensor.cuh"
-#include "../include/utils.cuh"
+#include <tensor.cuh>
 
 TensorView::TensorView(std::array<size_t, MAX_DIMS> s, size_t rank)
     : rank(rank), shape(s) {

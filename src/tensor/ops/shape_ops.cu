@@ -1,4 +1,4 @@
-#include "../../../include/tensor.cuh"
+#include <tensor.cuh>
 // #include "../../../include/utils.cuh"
 
 // NOTE: CUDA Kernels

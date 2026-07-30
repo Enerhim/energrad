@@ -1,5 +1,6 @@
-#include "../include/tensor.cuh"
-#include "../include/utils.cuh"
+#include <tensor.cuh>
+#include <utils.cuh>
+
 // NOTE:  Utils
 
 std::vector<size_t> arrToVec(std::array<size_t, MAX_DIMS> arr, size_t rank) {
@@ -68,7 +69,7 @@ void print(Tensor A) {
 
       offset += indice * strides[dim];
     }
-    std::cout << data[offset];
+    std::cout << data[offset] << " ";
   }
   std::cout << " ]" << std::endl;
 }

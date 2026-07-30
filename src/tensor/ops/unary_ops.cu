@@ -1,5 +1,5 @@
-#include "../../../include/tensor.cuh"
-#include "../../../include/utils.cuh"
+#include <tensor.cuh>
+#include <utils.cuh>
 
 // NOTE: CUDA Kernel
 

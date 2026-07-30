@@ -57,9 +57,10 @@ void TensorSave(Tensor A, std::string filename);
 
 Tensor TensorInit(std::array<size_t, MAX_DIMS> &shape, size_t rank, float a,
                   StorageDevice device, bool makeStorage);
-Tensor TensorCreate(std::vector<size_t> &shape, float a, StorageDevice device);
-Tensor TensorOnes(std::vector<size_t> &shape, StorageDevice device);
-Tensor TensorZeros(std::vector<size_t> &shape, StorageDevice device);
+Tensor TensorCreate(const std::vector<size_t> &shape, float a,
+                    StorageDevice device);
+Tensor TensorOnes(const std::vector<size_t> &shape, StorageDevice device);
+Tensor TensorZeros(const std::vector<size_t> &shape, StorageDevice device);
 Tensor TensorCopy(Tensor A, bool newStorage = false);
 
 // TODO:

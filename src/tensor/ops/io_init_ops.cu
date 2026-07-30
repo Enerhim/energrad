@@ -1,6 +1,5 @@
-#include "../../../include/tensor.cuh"
-#include "../../../include/utils.cuh"
-#include <algorithm>
+#include <tensor.cuh>
+#include <utils.cuh>
 
 // NOTE: CUDA Kernels
 
@@ -39,7 +38,8 @@ Tensor TensorInit(std::array<size_t, MAX_DIMS> &shape, size_t rank, float a,
   return result;
 }
 
-Tensor TensorCreate(std::vector<size_t> &s, float a, StorageDevice device) {
+Tensor TensorCreate(const std::vector<size_t> &s, float a,
+                    StorageDevice device) {
   size_t rank = s.size();
   std::array<size_t, MAX_DIMS> shapeArray;
   std::copy(s.begin(), s.end(), shapeArray.begin());
@@ -48,11 +48,11 @@ Tensor TensorCreate(std::vector<size_t> &s, float a, StorageDevice device) {
   return TensorInit(shapeArray, rank, a, device, true);
 }
 
-Tensor TensorOnes(std::vector<size_t> &shape, StorageDevice device) {
+Tensor TensorOnes(const std::vector<size_t> &shape, StorageDevice device) {
   return TensorCreate(shape, 1.0f, device);
 }
 
-Tensor TensorZeros(std::vector<size_t> &shape, StorageDevice device) {
+Tensor TensorZeros(const std::vector<size_t> &shape, StorageDevice device) {
   return TensorCreate(shape, 0.0f, device);
 }
 
