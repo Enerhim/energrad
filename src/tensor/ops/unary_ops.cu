@@ -39,7 +39,7 @@ void CPU_TensorAbs(float *dataA, TensorMeta &metaA, float *dataResult) {
       offset += indice * metaA.strides[dim];
     }
 
-    dataResult[idx] = -dataA[offset];
+    dataResult[idx] = std::abs(dataA[offset]);
   }
 }
 

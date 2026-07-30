@@ -1,3 +1,4 @@
+#include <iostream>
 #include <tensor.cuh>
 #include <utils.cuh>
 
@@ -5,9 +6,11 @@
 
 // NOTE: CPU Kernels
 
-void CPU_TensorFill(float *dataA, float a, TensorMeta &metaA) {}
-void CPU_TensorZeros(float *dataA, TensorMeta &metaA) {}
-void CPU_TensorOnes(float *dataA, TensorMeta &metaA) {}
+void CPU_TensorFill(float *dataA, float a, TensorMeta &metaA) {
+  for (size_t idx = 0; idx < metaA.elements; idx++) {
+    dataA[idx] = a;
+  }
+}
 
 // NOTE: API Functions
 
@@ -21,6 +24,7 @@ Tensor TensorInit(std::array<size_t, MAX_DIMS> &shape, size_t rank, float a,
     size_t elements = calculateLogicalElementNo(shape, rank);
     auto storageResult =
         std::make_shared<TensorStorage>(elements * sizeof(float), device);
+    result->storage = storageResult;
 
     TensorMeta meta(static_cast<int>(rank), elements, result->shape,
                     result->strides);

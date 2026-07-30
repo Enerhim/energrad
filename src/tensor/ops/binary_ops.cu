@@ -74,6 +74,7 @@ void CPU_TensorMul(float *dataA, TensorMeta &metaA, float *dataB,
 void CPU_TensorMatmulRR(float *dataA, TensorMeta &metaA, float *dataB,
                         TensorMeta &metaB, float *dataResult) {
   assert(metaA.shape[metaA.ndims - 1] == metaB.shape[metaB.ndims - 2]);
+  assert(metaA.ndims >= 2 && metaB.ndims >= 2);
 
   size_t M = metaA.shape[metaA.ndims - 2];
   size_t K = metaA.shape[metaA.ndims - 1];
@@ -202,38 +203,57 @@ Tensor TensorMul(Tensor A, Tensor B) {
   }
   return result;
 }
-Tensor TensorMatmul(Tensor A, Tensor B, bool AT, bool BT) {
-  // uint8_t transposeFlags = (AT << 1) + BT;
-  Tensor result;
-  TensorMeta metaA, metaB;
-  _TensorBinary_(A, B, result, metaA, metaB, false, false, true);
 
+Tensor TensorMatmul(Tensor A, Tensor B, bool AT, bool BT) {
+  // Check if mat for matmul is even there
   auto rankA = A->rank, rankB = B->rank;
 
-  if (rankA < 2 || rankB < 2)
+  if (rankA <= 2 || rankB <= 2) {
     return nullptr;
-
-  auto targetShape = metaA.shape;
-  targetShape[rankA - 1] = metaB.shape[rankB - 1];
-  targetShape[rankA - 2] = metaB.shape[rankB - 2];
-  B = TensorContiguous(TensorBroadcast(B, targetShape));
-
-  if (!checkContiguous(A)) {
-    A = TensorContiguous(A);
-  }
-  if (!checkContiguous(B)) {
-    B = TensorContiguous(B);
   }
 
+  auto shapeA = A->shape, shapeB = B->shape;
+  if (AT) {
+    A = TensorTranspose(A, rankA - 1, rankB - 2);
+    shapeA = A->shape;
+  }
+  if (BT) {
+    B = TensorTranspose(B, rankB - 1, rankB - 2);
+    shapeB = B->shape;
+  }
   auto storageA = A->storage, storageB = B->storage;
   auto dataA = storageA->data, dataB = storageB->data;
 
-  switch (storageA->device) {
+  if (storageA->device != storageB->device) {
+    TensorMoveDevice(B, storageA->device);
+  }
+
+  auto resultShape = shapeA;
+  resultShape[rankA - 1] =
+      shapeB[rankB - 1]; // A: (M x K), B: (K x N) => A.B = (M x N) hence we
+                         // just replace K in A with N
+  Tensor result = TensorInit(resultShape, rankA, 0.0f, storageA->device, true);
+  auto resultingData = result->storage->data;
+  // Broadcast B to A
+  auto tempBShape = shapeA;
+  tempBShape[rankA - 1] = shapeB[rankB - 1];
+  tempBShape[rankA - 2] = shapeB[rankB - 2];
+  B = TensorContiguous(TensorBroadcast(B, tempBShape));
+  shapeB = B->shape;
+
+  auto stridesA = A->strides, stridesB = B->strides;
+  auto elementsA = calculateLogicalElementNo(shapeA, rankA),
+       elementsB = calculateLogicalElementNo(shapeB, rankB);
+
+  TensorMeta metaA(rankA, elementsA, shapeA, stridesA);
+  TensorMeta metaB(rankB, elementsB, shapeB, stridesB);
+
+  switch (A->storage->device) {
   case StorageDevice::CPU:
-    CPU_TensorMatmulRR(dataA, metaA, dataB, metaB, result->storage->data);
+    CPU_TensorMatmulRR(dataA, metaA, dataB, metaB, resultingData);
     break;
   case StorageDevice::CUDA:
-    // Call GPU Kernel
+    // TODO: GPU kernel
     break;
   }
 
