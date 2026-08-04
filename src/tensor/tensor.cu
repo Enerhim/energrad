@@ -1,3 +1,4 @@
+#include <cuda_runtime.h>
 #include <tensor.cuh>
 
 TensorView::TensorView(std::array<size_t, MAX_DIMS> s, size_t rank)
@@ -18,7 +19,6 @@ TensorStorage::TensorStorage(size_t bytes, StorageDevice device)
     data = new float[bytes / sizeof(float)];
     break;
   case StorageDevice::CUDA:
-    // TODO: Impl CUDA Allocation
     break;
   }
 };

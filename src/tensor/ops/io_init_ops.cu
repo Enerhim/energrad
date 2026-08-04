@@ -56,7 +56,8 @@ Tensor TensorOnes(const std::vector<size_t> &shape, StorageDevice device) {
   return TensorCreate(shape, 1.0f, device);
 }
 
-Tensor TensorZeros(const std::vector<size_t> &shape, StorageDevice device) {
+Tensor TensorZeros(const std::vector<size_t> &shape,
+                   const StorageDevice device) {
   return TensorCreate(shape, 0.0f, device);
 }
 

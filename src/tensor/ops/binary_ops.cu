@@ -143,6 +143,7 @@ void _TensorBinary_(Tensor A, Tensor B, Tensor &result, TensorMeta &mA,
   result = TensorInit(shapeA, rankA, 0.0f, deviceA, true);
 }
 
+
 Tensor TensorAdd(Tensor A, Tensor B) {
   Tensor result;
   TensorMeta metaA, metaB;
@@ -152,7 +153,7 @@ Tensor TensorAdd(Tensor A, Tensor B) {
   auto dataA = storageA->data, dataB = B->storage->data;
   switch (deviceA) {
   case StorageDevice::CPU:
-    // TODO: Optimization: Check if contiguous, in which case run the super
+    // TODO: Optimization: Check if contiguous in which case run the super
     // simple kernel - both fore CUDA and CPU
     CPU_TensorAdd(dataA, metaA, dataB, metaB, result->storage->data);
     break;

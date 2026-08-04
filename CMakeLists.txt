@@ -17,7 +17,7 @@ if (ENERGRAD_BUILD_TESTS)
   enable_testing()
 
   add_executable(ops_tests
-      tests/ops.cu
+      tests/op_tests.cu
   )
 
   target_link_libraries(ops_tests
