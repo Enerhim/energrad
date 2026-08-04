@@ -71,7 +71,7 @@ Node CoshNode(Node A);
 Node TanhNode(Node A);
 Node FloorNode(Node A);
 Node CeilNode(Node A);
-Node ScaleNode(Node A);
+Node ScaleNode(Node A, float a);
 Node ReluNode(Node A);
 Node SigmoidNode(Node A);
 Node SoftmaxNode(Node A);
