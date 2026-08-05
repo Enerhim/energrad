@@ -209,7 +209,7 @@ Tensor TensorMatmul(Tensor A, Tensor B, bool AT, bool BT) {
   // Check if mat for matmul is even there
   auto rankA = A->rank, rankB = B->rank;
 
-  if (rankA <= 2 || rankB <= 2) {
+  if (rankA < 2 || rankB < 2) {
     return nullptr;
   }
 

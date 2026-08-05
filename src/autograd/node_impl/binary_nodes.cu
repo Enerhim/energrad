@@ -42,7 +42,19 @@ Node MulNode(Node A, Node B) {
   r->inputs[1] = B;
   return r;
 }
-Node MatmulNode(Node A, Node B);
+
+Node MatmulNode(Node A, Node B) {
+  Tensor inA = A->data;
+  Tensor inB = B->data;
+  Tensor result = TensorMatmul(inA, inB, false, false);
+
+  Node r = std::make_shared<AutogradNode>(result, Operation::OP_MATMUL,
+                                          A->requiresGrad || B->requiresGrad,
+                                          A->retainsGrad || B->retainsGrad);
+  r->inputs[0] = A;
+  r->inputs[1] = B;
+  return r;
+}
 
 // NOTE: Backward Nodes
 
@@ -93,11 +105,26 @@ void MulBackward(Node node) {
   Tensor dataA = node->inputs[0]->data;
   Tensor dataB = node->inputs[1]->data;
 
-  if (!__BinaryBackward__(node, Operation::OP_SUB, gradA, gradB))
+  if (!__BinaryBackward__(node, Operation::OP_MUL, gradA, gradB))
     return;
 
   node->inputs[0]->grad = TensorAdd(gradA, TensorMul(topGrad, dataB));
   node->inputs[1]->grad = TensorAdd(gradB, TensorMul(topGrad, dataA));
 }
 
-void MatmulBackward(Node node) {}
+void MatmulBackward(Node node) {
+  Tensor gradA;
+  Tensor gradB;
+  Tensor topGrad = node->grad;
+
+  Tensor dataA = node->inputs[0]->data;
+  Tensor dataB = node->inputs[1]->data;
+
+  if (!__BinaryBackward__(node, Operation::OP_MATMUL, gradA, gradB))
+    return;
+
+  node->inputs[0]->grad =
+      TensorAdd(gradA, TensorMatmul(topGrad, dataB, false, true));
+  node->inputs[1]->grad =
+      TensorAdd(gradB, TensorMatmul(dataA, topGrad, true, false));
+}

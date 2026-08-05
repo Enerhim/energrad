@@ -41,6 +41,11 @@ public:
   size_t noInputs = 0;
   Operation op = Operation::NONE;
 
+  struct ctx {
+    Tensor tensors[2];
+    float params[2];
+  } ctx;
+
   bool requiresGrad = false;
   bool retainsGrad = false;
 
