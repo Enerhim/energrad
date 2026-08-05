@@ -407,6 +407,69 @@ void CPU_TensorSoftmax(float *dataA, TensorMeta &metaA, float *dataResult) {
   }
 }
 
+void CPU_TensorAbsBackward(float *dataA, TensorMeta &metaA, float *dataResult) {
+  // Need to unfold according to strides
+  size_t ndim = metaA.ndims;
+
+  for (size_t idx = 0; idx < metaA.elements; idx++) {
+    size_t offset = 0;
+    size_t remaining = idx;
+
+    for (int dim = static_cast<int>(ndim) - 1; dim >= 0; dim--) {
+      size_t dim_size = metaA.shape[dim];
+      size_t indice = remaining % dim_size;
+      remaining /= dim_size;
+
+      offset += indice * metaA.strides[dim];
+    }
+
+    dataResult[idx] =
+        dataA[offset] > 0.0f ? 1.0f : (dataA[offset] < 0.0f ? -1.0f : 0.0f);
+  }
+}
+
+void CPU_TensorReluBackward(float *dataA, TensorMeta &metaA,
+                            float *dataResult) {
+  // Need to unfold according to strides
+  size_t ndim = metaA.ndims;
+
+  for (size_t idx = 0; idx < metaA.elements; idx++) {
+    size_t offset = 0;
+    size_t remaining = idx;
+
+    for (int dim = static_cast<int>(ndim) - 1; dim >= 0; dim--) {
+      size_t dim_size = metaA.shape[dim];
+      size_t indice = remaining % dim_size;
+      remaining /= dim_size;
+
+      offset += indice * metaA.strides[dim];
+    }
+
+    dataResult[idx] = dataA[offset] > 0.0f ? 1.0f : 0.0f;
+  }
+}
+
+void CPU_TensorSoftmaxBackward(float *dataA, TensorMeta &metaA,
+                               float *dataResult) {
+  // Need to unfold according to strides
+  size_t ndim = metaA.ndims;
+
+  for (size_t idx = 0; idx < metaA.elements; idx++) {
+    size_t offset = 0;
+    size_t remaining = idx;
+
+    for (int dim = static_cast<int>(ndim) - 1; dim >= 0; dim--) {
+      size_t dim_size = metaA.shape[dim];
+      size_t indice = remaining % dim_size;
+      remaining /= dim_size;
+
+      offset += indice * metaA.strides[dim];
+    }
+
+    dataResult[idx] =
+        dataA[offset] > 0.0f ? 1.0f : (dataA[offset] < 0.0f ? -1.0f : 0.0f);
+  }
+}
 // NOTE: API Function
 
 TensorMeta _TensorUnary_(Tensor A, Tensor &result) {
@@ -809,6 +872,66 @@ Tensor TensorSoftmax(Tensor A) {
     // TODO: Optimization: Check if contiguous, in which case run the super
     // simple kernel - both fore CUDA and CPU
     CPU_TensorSoftmax(dataA, meta, result->storage->data);
+    break;
+  case StorageDevice::CUDA:
+    // Call GPU Kernel
+    break;
+  }
+
+  return result;
+}
+
+Tensor TensorAbsBackward(Tensor A) {
+  Tensor result;
+  auto meta = _TensorUnary_(A, result);
+  auto storageA = A->storage;
+  auto dataA = storageA->data;
+
+  switch (storageA->device) {
+  case StorageDevice::CPU:
+    // TODO: Optimization: Check if contiguous, in which case run the super
+    // simple kernel - both fore CUDA and CPU
+    CPU_TensorAbsBackward(dataA, meta, result->storage->data);
+    break;
+  case StorageDevice::CUDA:
+    // Call GPU Kernel
+    break;
+  }
+
+  return result;
+}
+
+Tensor TensorReluBackward(Tensor A) {
+  Tensor result;
+  auto meta = _TensorUnary_(A, result);
+  auto storageA = A->storage;
+  auto dataA = storageA->data;
+
+  switch (storageA->device) {
+  case StorageDevice::CPU:
+    // TODO: Optimization: Check if contiguous, in which case run the super
+    // simple kernel - both fore CUDA and CPU
+    CPU_TensorReluBackward(dataA, meta, result->storage->data);
+    break;
+  case StorageDevice::CUDA:
+    // Call GPU Kernel
+    break;
+  }
+
+  return result;
+}
+
+Tensor TensorSoftmaxBackward(Tensor A) {
+  Tensor result;
+  auto meta = _TensorUnary_(A, result);
+  auto storageA = A->storage;
+  auto dataA = storageA->data;
+
+  switch (storageA->device) {
+  case StorageDevice::CPU:
+    // TODO: Optimization: Check if contiguous, in which case run the super
+    // simple kernel - both fore CUDA and CPU
+    CPU_TensorSoftmaxBackward(dataA, meta, result->storage->data);
     break;
   case StorageDevice::CUDA:
     // Call GPU Kernel

@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <tensor.cuh>
 
 TensorView::TensorView(std::array<size_t, MAX_DIMS> s, size_t rank)

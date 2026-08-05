@@ -52,15 +52,20 @@ typedef struct TensorMeta {
 // IO, Init
 
 // TODO:
-Tensor TensorLoad(std::string filename);
-void TensorSave(Tensor A, std::string filename);
+Tensor TensorLoadFile(std::string filename);
+void TensorLoadFile(Tensor A, std::string filename);
 
 Tensor TensorInit(std::array<size_t, MAX_DIMS> &shape, size_t rank, float a,
                   StorageDevice device, bool makeStorage);
 Tensor TensorCreate(const std::vector<size_t> &shape, float a,
                     StorageDevice device);
+
+void TensorLoadData(Tensor A, const float *data, size_t size_);
+
 Tensor TensorOnes(const std::vector<size_t> &shape, StorageDevice device);
 Tensor TensorZeros(const std::vector<size_t> &shape, StorageDevice device);
+Tensor TensorRand(const std::vector<size_t> &shape, StorageDevice device,
+                  bool normal = false, float min = 0.0f, float max = 1.0f);
 Tensor TensorCopy(Tensor A, bool newStorage = false);
 
 // TODO:
@@ -88,6 +93,10 @@ Tensor TensorScale(Tensor A, float a);
 Tensor TensorRelu(Tensor A);
 Tensor TensorSigmoid(Tensor A);
 Tensor TensorSoftmax(Tensor A);
+
+Tensor TensorAbsBackward(Tensor A);
+Tensor TensorReluBackward(Tensor A);
+Tensor TensorSoftmaxBackward(Tensor A);
 
 Tensor TensorTranspose(Tensor A, size_t dim1, size_t dim2);
 Tensor TensorBroadcast(Tensor A, std::array<size_t, MAX_DIMS> targetShape);
@@ -142,6 +151,11 @@ void CPU_TensorScale(float *dataA, TensorMeta &metaA, float scalar,
 void CPU_TensorRelu(float *dataA, TensorMeta &metaA, float *dataResult);
 void CPU_TensorSigmoid(float *dataA, TensorMeta &metaA, float *dataResult);
 void CPU_TensorSoftmax(float *dataA, TensorMeta &metaA, float *dataResult);
+
+void CPU_TensorAbsBackward(float *dataA, TensorMeta &metaA, float *dataResult);
+void CPU_TensorReluBackward(float *dataA, TensorMeta &metaA, float *dataResult);
+void CPU_TensorSoftmaxBackward(float *dataA, TensorMeta &metaA,
+                               float *dataResult);
 
 // Binary Ops
 void CPU_TensorAdd(float *dataA, TensorMeta &metaA, float *dataB,
