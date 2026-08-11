@@ -1,8 +1,8 @@
 # Energrad 
 
-An autograd engine in CUDA
+An autograd engine in CUDA/C++
 
-Currently supports: 
+Currently supports (only CPU rn): 
 - Math operations on n-dim tensors
 - Separated tensor views and tensor storage
 - Autograd graph building based on tensor operations

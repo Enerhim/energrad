@@ -35,7 +35,7 @@ Node MulNode(Node A, Node B) {
   Tensor inB = B->data;
   Tensor result = TensorMul(inA, inB);
 
-  Node r = std::make_shared<AutogradNode>(result, Operation::OP_SUB,
+  Node r = std::make_shared<AutogradNode>(result, Operation::OP_MUL,
                                           A->requiresGrad || B->requiresGrad,
                                           A->retainsGrad || B->retainsGrad);
   r->inputs[0] = A;
