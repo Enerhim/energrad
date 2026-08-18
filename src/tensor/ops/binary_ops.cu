@@ -123,12 +123,12 @@ void _TensorBinary_(Tensor A, Tensor B, Tensor &result, TensorMeta &mA,
   if (autoBroadcast) {
     if (shapeA != shapeB) {
       if (checkBroadcastable(B, A)) {
-        B = TensorBroadcast(B, shapeA);
+        B = TensorBroadcast(B, shapeA, A->rank);
         shapeB = B->shape, stridesB = B->strides;
 
       } else if (autoBroadcastBoth) {
         if (checkBroadcastable(A, B)) {
-          A = TensorBroadcast(A, shapeB);
+          A = TensorBroadcast(A, shapeB, B->rank);
           shapeA = A->shape, stridesA = A->strides;
         }
       }
@@ -142,7 +142,6 @@ void _TensorBinary_(Tensor A, Tensor B, Tensor &result, TensorMeta &mA,
   mB = TensorMeta(rankB, elementsB, shapeB, stridesB);
   result = TensorInit(shapeA, rankA, 0.0f, deviceA, true);
 }
-
 
 Tensor TensorAdd(Tensor A, Tensor B) {
   Tensor result;
@@ -239,7 +238,7 @@ Tensor TensorMatmul(Tensor A, Tensor B, bool AT, bool BT) {
   auto tempBShape = shapeA;
   tempBShape[rankA - 1] = shapeB[rankB - 1];
   tempBShape[rankA - 2] = shapeB[rankB - 2];
-  B = TensorContiguous(TensorBroadcast(B, tempBShape));
+  B = TensorContiguous(TensorBroadcast(B, tempBShape, A->rank));
   shapeB = B->shape;
 
   auto stridesA = A->strides, stridesB = B->strides;

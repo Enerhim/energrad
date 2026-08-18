@@ -99,11 +99,9 @@ Tensor TensorReluBackward(Tensor A);
 Tensor TensorSoftmaxBackward(Tensor A);
 
 Tensor TensorTranspose(Tensor A, size_t dim1, size_t dim2);
-Tensor TensorBroadcast(Tensor A, std::array<size_t, MAX_DIMS> targetShape);
+Tensor TensorBroadcast(Tensor A, std::array<size_t, MAX_DIMS> targetShape,
+                       size_t rank);
 Tensor TensorContiguous(Tensor A);
-
-// TODO: {
-Tensor TensorPermute(Tensor A);
 
 Tensor TensorSum(Tensor A, size_t dim, bool keepDims);
 Tensor TensorMean(Tensor A, size_t dim, bool keepDims);
@@ -111,16 +109,16 @@ Tensor TensorMin(Tensor A, size_t dim, bool keepDims);
 Tensor TensorMax(Tensor A, size_t dim, bool keepDims);
 Tensor TensorNorm(Tensor A, size_t dim, bool keepDims);
 
-// TODO: }
-
 // Binary Operations
 Tensor TensorAdd(Tensor A, Tensor B);
 Tensor TensorSub(Tensor A, Tensor B);
 Tensor TensorMul(Tensor A, Tensor B);
 Tensor TensorMatmul(Tensor A, Tensor B, bool AT = false, bool BT = false);
 
-// TODO:
+// TODO: Comparison ops
 Tensor TensorEquals(Tensor A, Tensor B);
+Tensor TensorLT(Tensor A, Tensor B);
+Tensor TensorGT(Tensor A, Tensor B);
 
 // NOTE: CPU Kernels
 
@@ -156,6 +154,17 @@ void CPU_TensorAbsBackward(float *dataA, TensorMeta &metaA, float *dataResult);
 void CPU_TensorReluBackward(float *dataA, TensorMeta &metaA, float *dataResult);
 void CPU_TensorSoftmaxBackward(float *dataA, TensorMeta &metaA,
                                float *dataResult);
+
+void CPU_TensorSum(float *dataA, TensorMeta &mA, size_t dimk,
+                   float *dataResult);
+void CPU_TensorMean(float *dataA, TensorMeta &mA, size_t dimk,
+                    float *dataResult);
+void CPU_TensorMin(float *dataA, TensorMeta &mA, size_t dimk,
+                   float *dataResult);
+void CPU_TensorMax(float *dataA, TensorMeta &mA, size_t dimk,
+                   float *dataResult);
+void CPU_TensorNorm(float *dataA, TensorMeta &mA, size_t dimk,
+                    float *dataResult);
 
 // Binary Ops
 void CPU_TensorAdd(float *dataA, TensorMeta &metaA, float *dataB,

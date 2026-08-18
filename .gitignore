@@ -5,3 +5,4 @@ build
 *.out
 ./autograd.cu
 TODO.md
+REDUCTION_OPS.md
