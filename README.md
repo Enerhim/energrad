@@ -2,7 +2,7 @@
 
 An autograd engine in CUDA/C++
 
-Currently supports (only CPU rn): 
+Current rewrite supports (only CPU rn): 
 - Math operations on n-dim tensors
 - Separated tensor views and tensor storage
 - Autograd graph building based on tensor operations
